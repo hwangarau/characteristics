@@ -209,15 +209,20 @@ details summary:hover { color: var(--text); }
   z-index: 5;
 }
 
-/* Zoom controls */
+/* Zoom controls — top-right corner */
 #zoom-controls {
   position: fixed;
-  bottom: 32px;
+  top: 12px;
   right: 12px;
   display: flex;
   align-items: center;
   gap: 4px;
   z-index: 10;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
 }
 
 #zoom-controls button {

@@ -25,7 +25,7 @@ export function initUI(onRecompute) {
   elements.resolveShocks = $('resolve-shocks');
   elements.zoomInBtn = $('zoom-in-btn');
   elements.zoomOutBtn = $('zoom-out-btn');
-  elements.recenterBtn = $('recenter-btn2');
+  elements.recenterBtn = $('recenter-btn');
   elements.zoomLevel = $('zoom-level');
   elements.statusText = $('status-text');
 

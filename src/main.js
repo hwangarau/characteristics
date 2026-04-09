@@ -38,6 +38,9 @@ function recompute() {
   const state = getState();
   currentState = state;
 
+  // Save default viewport for recenter (updated on each full recompute)
+  defaultViewport = { xRange: [...state.xRange], tRange: [...state.tRange] };
+
   // Clear error styles
   document.getElementById('input-a').classList.remove('error');
   document.getElementById('input-b').classList.remove('error');
@@ -207,8 +210,10 @@ function setupPanZoom(canvas) {
     const newTMax = worldT + (renderer.tMax - worldT) * zoomFactor;
 
     // Update state immediately
+    zoomScale /= zoomFactor;
     currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
     updateViewport(newXMin, newXMax, newTMin, newTMax);
+    setZoomLevel(zoomScale);
 
     // Instant redraw with existing curves
     rerender();
@@ -309,6 +314,47 @@ function setupHover(canvas) {
   });
 }
 
+// ─── Zoom buttons ───
+
+function setupZoomButtons() {
+  const { zoomIn, zoomOut, recenter } = getZoomControls();
+
+  function zoom(factor) {
+    const cx = (renderer.xMin + renderer.xMax) / 2;
+    const ct = (renderer.tMin + renderer.tMax) / 2;
+    const hw = (renderer.xMax - renderer.xMin) / 2 * factor;
+    const ht = (renderer.tMax - renderer.tMin) / 2 * factor;
+
+    const newXMin = cx - hw;
+    const newXMax = cx + hw;
+    const newTMin = Math.max(0, ct - ht);
+    const newTMax = ct + ht;
+
+    zoomScale /= factor;
+    currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
+    updateViewport(newXMin, newXMax, newTMin, newTMax);
+    setZoomLevel(zoomScale);
+    rerender();
+
+    // Debounced retrace
+    clearTimeout(zoom._timer);
+    zoom._timer = setTimeout(recompute, 300);
+  }
+
+  zoomIn?.addEventListener('click', () => zoom(1 / 1.3));
+  zoomOut?.addEventListener('click', () => zoom(1.3));
+
+  recenter?.addEventListener('click', () => {
+    if (defaultViewport) {
+      zoomScale = 1.0;
+      currentState = { ...currentState, xRange: [...defaultViewport.xRange], tRange: [...defaultViewport.tRange] };
+      updateViewport(...defaultViewport.xRange, ...defaultViewport.tRange);
+      setZoomLevel(1.0);
+      recompute();
+    }
+  });
+}
+
 // ─── Init ───
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -327,6 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initUI(recompute);
   setupHover(canvas);
   setupPanZoom(canvas);
+  setupZoomButtons();
 
   let resizeTimer;
   window.addEventListener('resize', () => {
@@ -337,5 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load first preset
   document.getElementById('preset-select').value = '0';
   loadPreset(PRESETS[0]);
+  defaultViewport = { xRange: [...PRESETS[0].xRange], tRange: [...PRESETS[0].tRange] };
+  zoomScale = 1.0;
   recompute();
 });
