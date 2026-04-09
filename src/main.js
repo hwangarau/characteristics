@@ -96,8 +96,9 @@ function recompute() {
   currentLeftCaustic = shockResult.leftCaustic || [];
   currentRightCaustic = shockResult.rightCaustic || [];
 
-  // 4. Render
+  // 4. Render and snapshot for pan/zoom
   rerender();
+  renderer.snapshot();
 
   // 5. Particles — always stop first, then restart if needed
   stopAnimation();
@@ -234,8 +235,9 @@ function setupPanZoom(canvas) {
     updateViewport(newXMin, newXMax, newTMin, newTMax);
     setZoomLevel(zoomScale);
 
-    // Instant redraw with existing curves
-    rerender();
+    // Instant blit — shift/scale the cached snapshot (one drawImage call)
+    renderer.setViewport(newXMin, newXMax, newTMin, newTMax);
+    renderer.blitSnapshot();
 
     // Update particle viewport if animating
     if (animating) {
@@ -272,7 +274,10 @@ function setupPanZoom(canvas) {
 
     currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
     updateViewport(newXMin, newXMax, newTMin, newTMax);
-    rerender();
+
+    // Instant blit — shift the cached snapshot
+    renderer.setViewport(newXMin, newXMax, newTMin, newTMax);
+    renderer.blitSnapshot();
 
     if (animating) {
       particleGL.setViewport(newXMin, newXMax, newTMin, newTMax);

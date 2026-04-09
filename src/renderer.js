@@ -26,6 +26,11 @@ export class Renderer {
     this.tMin = 0;
     this.tMax = 4;
 
+    // Offscreen canvas for pan/zoom bitmap shifting
+    this._offscreen = document.createElement('canvas');
+    this._offCtx = this._offscreen.getContext('2d');
+    this._snapshotViewport = null; // viewport when snapshot was taken
+
     // Particle state
     this.particles = [];
     this.cachedBackground = null;
@@ -42,7 +47,10 @@ export class Renderer {
     const h = window.innerHeight;
     this.canvas.width = w * dpr;
     this.canvas.height = h * dpr;
+    this._offscreen.width = w * dpr;
+    this._offscreen.height = h * dpr;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.displayWidth = w;
     this.displayHeight = h;
   }
@@ -549,6 +557,87 @@ export class Renderer {
     }
 
     ctx.restore();
+  }
+
+  /**
+   * Snapshot the current canvas to the offscreen buffer.
+   * Call after a full recompute+draw. Saves the viewport used.
+   */
+  snapshot() {
+    this._snapshotViewport = {
+      xMin: this.xMin, xMax: this.xMax,
+      tMin: this.tMin, tMax: this.tMax,
+    };
+    this._offCtx.setTransform(1, 0, 0, 1, 0, 0);
+    this._offCtx.drawImage(this.canvas, 0, 0);
+    const dpr = window.devicePixelRatio || 1;
+    this._offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /**
+   * Blit the offscreen snapshot to the main canvas with a viewport transform.
+   * Used during pan/zoom for instant response.
+   * Maps the snapshot's world coordinates to the current viewport.
+   */
+  blitSnapshot() {
+    const sv = this._snapshotViewport;
+    if (!sv) return false;
+
+    const m = this.margin;
+    const pw = this.plotWidth;
+    const ph = this.plotHeight;
+
+    // Compute pixel offset: how many pixels the old viewport shifted
+    // relative to the new viewport
+    const pxPerWorldX = pw / (this.xMax - this.xMin);
+    const pxPerWorldT = ph / (this.tMax - this.tMin);
+
+    const dx = (sv.xMin - this.xMin) * pxPerWorldX;
+    const dy = (this.tMax - sv.tMax) * pxPerWorldT;
+
+    // Scale factors (for zoom)
+    const scaleX = (sv.xMax - sv.xMin) / (this.xMax - this.xMin);
+    const scaleY = (sv.tMax - sv.tMin) / (this.tMax - this.tMin);
+
+    // Clear and draw background
+    this.ctx.fillStyle = '#0d1117';
+    this.ctx.fillRect(0, 0, this.displayWidth, this.displayHeight);
+
+    // Draw grid/axes at current viewport (these are cheap)
+    this.drawGrid();
+    this.drawAxes();
+
+    // Blit the snapshot with transform
+    // The snapshot's plot area starts at (m.left, m.top)
+    // We need to clip to the plot area, then draw the snapshot shifted/scaled
+    this.ctx.save();
+    this.ctx.beginPath();
+    this.ctx.rect(m.left, m.top, pw, ph);
+    this.ctx.clip();
+
+    const dpr = window.devicePixelRatio || 1;
+
+    // Source: the plot area from the offscreen canvas
+    const srcX = m.left * dpr;
+    const srcY = m.top * dpr;
+    const srcW = pw * dpr;
+    const srcH = ph * dpr;
+
+    // Destination: shifted and scaled plot area
+    const dstX = m.left + dx;
+    const dstY = m.top + dy;
+    const dstW = pw * scaleX;
+    const dstH = ph * scaleY;
+
+    this.ctx.drawImage(
+      this._offscreen,
+      srcX, srcY, srcW, srcH,
+      dstX, dstY, dstW, dstH
+    );
+
+    this.ctx.restore();
+
+    return true;
   }
 
   /**
