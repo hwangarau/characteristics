@@ -1,5 +1,7 @@
 # Method of Characteristics Visualizer
 
+**[Live Demo →](https://hwangarau.github.io/characteristics/)**
+
 Interactive visualizer for the method of characteristics for first-order PDEs.
 
 Given the PDE `u_t + a(u,x,t) u_x = b(u,x,t)`, this tool traces characteristic curves in the (x, t) plane and renders them in real time as you edit the equation.
