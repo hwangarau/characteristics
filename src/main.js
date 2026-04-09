@@ -73,6 +73,9 @@ function recompute() {
     xRange: state.xRange,
     tRange: state.tRange,
     dt: 0.01,
+    domainType: state.domainType,
+    domainA: state.domainA,
+    domainB: state.domainB,
   });
 
   currentCharacteristics = result.characteristics;
@@ -294,7 +297,8 @@ function setupClickInspect(canvas) {
   const panel = document.getElementById('inspect-panel');
   const title = document.getElementById('inspect-title');
   const eqns = document.getElementById('inspect-equations');
-  const inspectCanvas = document.getElementById('inspect-canvas');
+  const canvasX = document.getElementById('inspect-canvas-x');
+  const canvasU = document.getElementById('inspect-canvas-u');
   const closeBtn = document.getElementById('inspect-close');
 
   closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
@@ -305,7 +309,6 @@ function setupClickInspect(canvas) {
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
 
-    // Find nearest characteristic
     let bestChar = null;
     let bestDist = Infinity;
 
@@ -326,58 +329,69 @@ function setupClickInspect(canvas) {
       return;
     }
 
-    // Show panel
     panel.classList.remove('hidden');
-    title.textContent = `Characteristic from x\u2080 = ${bestChar.x0.toFixed(2)}`;
+    title.textContent = `x\u2080 = ${bestChar.x0.toFixed(3)}, u\u2080 = ${isFinite(bestChar.u0) ? bestChar.u0.toFixed(3) : 'N/A'}`;
 
-    // Show initial values
-    const u0 = bestChar.u0;
+    // Show analytical solution (from the symbolic solver, if available)
     eqns.innerHTML = '';
-    const info = document.createElement('div');
-    info.style.cssText = 'font:12px Consolas,monospace; color:var(--text-dim); line-height:1.6';
-    info.innerHTML = `x\u2080 = ${bestChar.x0.toFixed(3)}<br>u\u2080 = ${isFinite(u0) ? u0.toFixed(3) : 'N/A'}<br>points: ${bestChar.points.length}`;
-    eqns.appendChild(info);
+    const solDiv = document.createElement('div');
+    solDiv.id = 'inspect-sol';
+    eqns.appendChild(solDiv);
 
-    // Draw u(t) curve on the inspect canvas
-    drawInspectCurve(inspectCanvas, bestChar);
+    // Fetch symbolic solution for display
+    solveCharacteristics(currentState.a, currentState.b).then(solutions => {
+      const lines = [];
+      if (solutions.xSolution) lines.push(solutions.xSolution.latex);
+      if (solutions.uSolution) lines.push(solutions.uSolution.latex);
+      if (lines.length) {
+        for (const latex of lines) {
+          renderSolution(solDiv, lines.join(', \\quad '));
+        }
+      }
+    }).catch(() => {});
+
+    // Draw x(t) and u(t) curves
+    drawMiniGraph(canvasX, bestChar, 'x');
+    drawMiniGraph(canvasU, bestChar, 'u');
   });
 }
 
-function drawInspectCurve(canvas, char) {
+function drawMiniGraph(canvas, char, field) {
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = 280 * dpr;
-  canvas.height = 120 * dpr;
+  const w = 340, h = 100;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const w = 280, h = 120;
-  const m = { top: 15, right: 10, bottom: 20, left: 35 };
+  const m = { top: 10, right: 10, bottom: 18, left: 40 };
   const pw = w - m.left - m.right;
   const ph = h - m.top - m.bottom;
 
-  // Background
   ctx.fillStyle = 'rgba(13, 17, 23, 0.8)';
   ctx.fillRect(0, 0, w, h);
 
   const pts = char.points;
   if (pts.length < 2) return;
 
-  // Find u range
-  let uMin = Infinity, uMax = -Infinity;
+  // Get values and range
+  let vMin = Infinity, vMax = -Infinity;
   for (const p of pts) {
-    if (isFinite(p.u)) {
-      uMin = Math.min(uMin, p.u);
-      uMax = Math.max(uMax, p.u);
+    const v = field === 'x' ? p.x : p.u;
+    if (isFinite(v)) {
+      vMin = Math.min(vMin, v);
+      vMax = Math.max(vMax, v);
     }
   }
-  if (!isFinite(uMin)) return;
-  if (uMax - uMin < 0.01) { uMin -= 0.5; uMax += 0.5; }
+  if (!isFinite(vMin)) return;
+  if (vMax - vMin < 0.01) { vMin -= 0.5; vMax += 0.5; }
 
   const tMin = pts[0].t;
   const tMax = pts[pts.length - 1].t;
+  if (tMax - tMin < 1e-10) return;
 
   // Axes
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
   ctx.lineWidth = 0.5;
   ctx.beginPath();
   ctx.moveTo(m.left, m.top + ph);
@@ -386,23 +400,23 @@ function drawInspectCurve(canvas, char) {
   ctx.lineTo(m.left, m.top + ph);
   ctx.stroke();
 
-  // Labels
-  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  // Tick labels
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.font = '9px Consolas';
-  ctx.textAlign = 'center';
-  ctx.fillText('t', m.left + pw / 2, h - 3);
   ctx.textAlign = 'right';
-  ctx.fillText('u', m.left - 4, m.top + ph / 2 + 3);
-  ctx.fillText(uMax.toFixed(1), m.left - 4, m.top + 8);
-  ctx.fillText(uMin.toFixed(1), m.left - 4, m.top + ph + 3);
+  ctx.fillText(vMax.toFixed(2), m.left - 3, m.top + 8);
+  ctx.fillText(vMin.toFixed(2), m.left - 3, m.top + ph + 3);
+  ctx.textAlign = 'center';
+  ctx.fillText(tMax.toFixed(1), m.left + pw, h - 2);
 
-  // Draw u(t) curve
-  ctx.strokeStyle = '#5b9bd5';
+  // Curve
+  ctx.strokeStyle = field === 'x' ? '#f39c12' : '#5b9bd5';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   for (let i = 0; i < pts.length; i++) {
+    const v = field === 'x' ? pts[i].x : pts[i].u;
     const px = m.left + (pts[i].t - tMin) / (tMax - tMin) * pw;
-    const py = m.top + ph - (pts[i].u - uMin) / (uMax - uMin) * ph;
+    const py = m.top + ph - (v - vMin) / (vMax - vMin) * ph;
     if (i === 0) ctx.moveTo(px, py);
     else ctx.lineTo(px, py);
   }

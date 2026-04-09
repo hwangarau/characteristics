@@ -59,7 +59,7 @@ function rk4Step(a, b, x, u, t, h) {
  * @param {number} xBound - terminate if |x| exceeds this
  * @returns {Characteristic}
  */
-function traceSingle(aFn, bFn, x0, t0, u0, dt, tMax, xBound) {
+function traceSingle(aFn, bFn, x0, t0, u0, dt, tMax, xBound, domainLeft = -Infinity, domainRight = Infinity) {
   const points = [{ x: x0, t: t0, u: u0 }];
 
   let x = x0;
@@ -87,8 +87,9 @@ function traceSingle(aFn, bFn, x0, t0, u0, dt, tMax, xBound) {
     u = next.u;
     t = t + h;
 
-    // Termination checks
-    if (!isFinite(x) || !isFinite(u) || Math.abs(x) > xBound || Math.abs(u) > 1e6) {
+    // Termination checks — including domain boundaries
+    if (!isFinite(x) || !isFinite(u) || Math.abs(x) > xBound || Math.abs(u) > 1e6
+        || x < domainLeft || x > domainRight) {
       break;
     }
 
@@ -110,27 +111,29 @@ function traceSingle(aFn, bFn, x0, t0, u0, dt, tMax, xBound) {
  * @returns {{ seeds: Array<{x0: number, t0: number, u0: number}>, warning: string|null }}
  */
 function generateSeeds(opts) {
-  const { initialDataFn, aDepends_u, numCurves, xRange, tRange } = opts;
-  const [xMin, xMax] = xRange;
+  const { initialDataFn, aDepends_u, numCurves, xRange, tRange,
+          domainType, domainA, domainB } = opts;
+
+  // Seed range: use domain bounds if bounded, else viewport
+  let seedMin = xRange[0], seedMax = xRange[1];
+  if (domainType === 'a-inf' || domainType === 'a-b') seedMin = Math.max(seedMin, domainA);
+  if (domainType === 'inf-b' || domainType === 'a-b') seedMax = Math.min(seedMax, domainB);
+
   const seeds = [];
   let warning = null;
 
   if (initialDataFn) {
-    // Launch from t = tMin along x-axis
     for (let i = 0; i < numCurves; i++) {
-      const x = xMin + (xMax - xMin) * i / (numCurves - 1);
+      const x = seedMin + (seedMax - seedMin) * i / (numCurves - 1);
       const u0 = initialDataFn(x);
       seeds.push({ x0: x, t0: tRange[0], u0 });
     }
   } else {
-    // Portrait mode — no initial data
     if (aDepends_u) {
       warning = 'Quasilinear equation (a depends on u) requires initial data to trace characteristics.';
     }
-
-    // Seed from x-axis
     for (let i = 0; i < numCurves; i++) {
-      const x = xMin + (xMax - xMin) * i / (numCurves - 1);
+      const x = seedMin + (seedMax - seedMin) * i / (numCurves - 1);
       seeds.push({ x0: x, t0: tRange[0], u0: 0 });
     }
   }
@@ -153,16 +156,25 @@ function generateSeeds(opts) {
  * @returns {{ characteristics: Characteristic[], shocks: Array<{x: number, t: number}>, warning: string|null }}
  */
 export function traceCharacteristics(opts) {
-  const { aFn, bFn, initialDataFn, aDepends_u, numCurves, xRange, tRange, dt } = opts;
+  const { aFn, bFn, initialDataFn, aDepends_u, numCurves, xRange, tRange, dt,
+          domainType, domainA, domainB } = opts;
 
   const { seeds, warning } = generateSeeds({
     initialDataFn, aDepends_u, numCurves, xRange, tRange,
+    domainType, domainA, domainB,
   });
 
-  const xBound = 2 * (xRange[1] - xRange[0]);
+  // Domain bounds for termination
+  let domainLeft = -Infinity, domainRight = Infinity;
+  if (domainType === 'a-inf' || domainType === 'a-b') domainLeft = domainA;
+  if (domainType === 'inf-b' || domainType === 'a-b') domainRight = domainB;
+
+  const xBound = domainRight < Infinity && domainLeft > -Infinity
+    ? Math.max(Math.abs(domainLeft), Math.abs(domainRight)) * 3
+    : 2 * (xRange[1] - xRange[0]);
 
   const characteristics = seeds.map(seed =>
-    traceSingle(aFn, bFn, seed.x0, seed.t0, seed.u0, dt, tRange[1], xBound)
+    traceSingle(aFn, bFn, seed.x0, seed.t0, seed.u0, dt, tRange[1], xBound, domainLeft, domainRight)
   );
 
   // Shock detection: find ALL crossings between adjacent characteristics
