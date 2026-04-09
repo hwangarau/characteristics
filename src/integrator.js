@@ -172,60 +172,73 @@ export function traceCharacteristics(opts) {
 }
 
 /**
- * Produce a "resolved" copy of characteristics: each curve is truncated
- * at the earliest shock time that affects it. Returns the truncated curves
- * plus the shock curve (points connected in order of increasing t).
+ * Resolve shocks: for each characteristic, find the earliest time it
+ * crosses any other characteristic, and truncate it there.
  *
- * @param {Characteristic[]} chars - original characteristics
- * @param {Array<{x: number, t: number, i: number, j: number}>} shocks - crossing points
- * @returns {{ resolved: Characteristic[], shockCurve: Array<{x: number, t: number}> }}
+ * Algorithm: at each time step k, sort all curves by their x-position.
+ * If any pair swaps order between step k and k+1, they've crossed.
+ * Record the crossing time for both curves.
  */
-export function resolveShocks(chars, shocks) {
-  if (!shocks.length) return { resolved: chars, shockCurve: [] };
+export function resolveShocks(chars, _shocks) {
+  if (chars.length < 2) return { resolved: chars, shockCurve: [] };
 
-  // For each characteristic, find the earliest shock time that involves it
-  const sorted = [...chars].sort((a, b) => a.x0 - b.x0);
-  const truncateTime = new Map(); // charIndex → earliest shock t
+  // Find earliest crossing time per characteristic
+  const cutoffTime = new Array(chars.length).fill(Infinity);
+  const allCrossings = [];
 
-  for (const s of shocks) {
-    // s.i and s.j are indices into the sorted array
-    const ci = sorted[s.i];
-    const cj = sorted[s.j];
+  // Find the minimum number of points across all curves
+  const minLen = Math.min(...chars.map(c => c.points.length));
+  if (minLen < 2) return { resolved: chars, shockCurve: [] };
 
-    for (const c of [ci, cj]) {
-      const key = c;
-      const existing = truncateTime.get(key);
-      if (existing === undefined || s.t < existing) {
-        truncateTime.set(key, s.t);
+  // At each time step, check all pairs for crossing
+  // We use the initial x0 ordering and track swaps
+  const indices = chars.map((_, i) => i);
+  indices.sort((a, b) => chars[a].x0 - chars[b].x0);
+
+  for (let k = 0; k < minLen - 1; k++) {
+    for (let ii = 0; ii < indices.length - 1; ii++) {
+      const a = indices[ii];
+      const b = indices[ii + 1];
+
+      const ptsA = chars[a].points;
+      const ptsB = chars[b].points;
+      if (k >= ptsA.length - 1 || k >= ptsB.length - 1) continue;
+
+      const diffK = ptsA[k].x - ptsB[k].x;
+      const diffK1 = ptsA[k + 1].x - ptsB[k + 1].x;
+
+      if (diffK * diffK1 < 0) {
+        // Crossing detected
+        const alpha = diffK / (diffK - diffK1);
+        const tCross = ptsA[k].t + alpha * (ptsA[k + 1].t - ptsA[k].t);
+        const xCross = ptsA[k].x + alpha * (ptsA[k + 1].x - ptsA[k].x);
+
+        cutoffTime[a] = Math.min(cutoffTime[a], tCross);
+        cutoffTime[b] = Math.min(cutoffTime[b], tCross);
+        allCrossings.push({ x: xCross, t: tCross });
       }
     }
   }
 
-  // Truncate each characteristic at its shock time
-  const resolved = sorted.map(char => {
-    const cutoff = truncateTime.get(char);
-    if (cutoff === undefined) return char;
+  // Truncate each characteristic at its cutoff time
+  const resolved = chars.map((char, i) => {
+    if (cutoffTime[i] === Infinity) return char;
 
     const truncated = [];
     for (const p of char.points) {
-      if (p.t > cutoff) break;
+      if (p.t > cutoffTime[i]) break;
       truncated.push(p);
     }
 
     return { ...char, points: truncated };
   });
 
-  // Build shock curve: sort shock points by t, then connect
-  const shockCurve = [...shocks]
-    .sort((a, b) => a.t - b.t)
-    .map(s => ({ x: s.x, t: s.t }));
-
-  return { resolved, shockCurve };
+  return { resolved, shockCurve: [] };
 }
 
 /**
- * Detect ALL crossings between adjacent characteristics (sorted by x0).
- * Returns crossing points with indices of the involved curves.
+ * Detect crossings between adjacent characteristics (sorted by x0).
+ * Returns crossing points for display as dots.
  */
 function detectShocks(chars) {
   if (chars.length < 2) return [];
@@ -246,8 +259,7 @@ function detectShocks(chars) {
         const alpha = diff_k / (diff_k - diff_k1);
         const tCross = c1[k].t + alpha * (c1[k + 1].t - c1[k].t);
         const xCross = c1[k].x + alpha * (c1[k + 1].x - c1[k].x);
-        shocks.push({ x: xCross, t: tCross, i, j: i + 1 });
-        // Don't break — find ALL crossings for this pair
+        shocks.push({ x: xCross, t: tCross });
       }
     }
   }
