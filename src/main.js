@@ -1,11 +1,13 @@
 /**
- * Main entry point — orchestrates the full pipeline:
- * UI input → math parsing → KaTeX display → ODE integration → canvas rendering → animation loop
+ * Main entry point — orchestrates the full pipeline.
  *
- * Priority: render curves first, then compute symbolic solutions in parallel.
+ * Two render paths for performance:
+ *   recompute() — full pipeline: parse → integrate → render (on input change)
+ *   rerender()  — just redraw at current viewport (on pan/zoom, instant)
  */
 
 import { Renderer } from './renderer.js';
+import { ParticleGL } from './particles-gl.js';
 import { compileExpression, compileInitialData } from './math-pipeline.js';
 import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
 import { traceCharacteristics, resolveShocks } from './integrator.js';
@@ -14,24 +16,32 @@ import { initUI, getState, setStatus, loadPreset, updateViewport } from './ui.js
 import { PRESETS } from './presets.js';
 
 let renderer;
+let particleGL;
 let currentCharacteristics = [];
+let currentShocks = [];
 let currentAFn = null;
-let currentColorMode = 'uniform';
+let currentICFn = null;
+let currentState = null;
 let animating = false;
 let animFrameId = null;
 
-// DOM elements for equation display
+// DOM elements
 let pdeDisplay, charOdeDisplay, icDisplay, xSolDisplay, uSolDisplay;
 
+/**
+ * Full recompute: parse expressions, trace characteristics, render.
+ * Called on equation/preset/setting changes.
+ */
 function recompute() {
   const state = getState();
+  currentState = state;
 
   // Clear error styles
   document.getElementById('input-a').classList.remove('error');
   document.getElementById('input-b').classList.remove('error');
   document.getElementById('input-ic').classList.remove('error');
 
-  // 1. Compile expressions
+  // 1. Compile
   const aResult = compileExpression(state.a);
   const bResult = compileExpression(state.b);
   const icResult = compileInitialData(state.initialData);
@@ -40,18 +50,16 @@ function recompute() {
   if (bResult.error) document.getElementById('input-b').classList.add('error');
   if (icResult.error) document.getElementById('input-ic').classList.add('error');
 
-  // 2. Update KaTeX displays (fast, do first)
+  // 2. KaTeX displays
   renderEquation(pdeDisplay, charOdeDisplay, aResult.latex, bResult.latex);
   renderInitialCondition(icDisplay, icResult.latex);
 
-  // 3. Bail if parse errors
   if (aResult.error || bResult.error) {
     setStatus(`Parse error: ${aResult.error || bResult.error}`);
     return;
   }
 
-  // 4. Trace characteristics (priority — this draws the picture)
-  const dt = 0.01;
+  // 3. Trace characteristics
   const result = traceCharacteristics({
     aFn: aResult.evaluate,
     bFn: bResult.evaluate,
@@ -60,63 +68,30 @@ function recompute() {
     numCurves: state.numCurves,
     xRange: state.xRange,
     tRange: state.tRange,
-    dt,
+    dt: 0.01,
   });
 
   currentCharacteristics = result.characteristics;
+  currentShocks = result.shocks;
   currentAFn = aResult.evaluate;
-  currentColorMode = state.colorMode;
+  currentICFn = icResult.evaluate;
 
-  // 5. Render
-  renderer.setViewport(state.xRange[0], state.xRange[1], state.tRange[0], state.tRange[1]);
-  renderer.clear();
-  renderer.drawGrid();
-  renderer.drawAxes();
+  // 4. Render
+  rerender();
 
-  // Resolve shocks if toggled — truncate characteristics at shock curve
-  let displayChars = currentCharacteristics;
-  let shockCurve = [];
-
-  if (state.resolveShocks && result.shocks.length > 0) {
-    const resolved = resolveShocks(currentCharacteristics, result.shocks);
-    displayChars = resolved.resolved;
-    shockCurve = resolved.shockCurve;
-  }
-
-  // In particle mode, don't draw solid curves (particles ARE the visualization)
-  if (!state.showParticles) {
-    renderer.drawCharacteristics(displayChars, state.colorMode, aResult.evaluate);
-  } else {
-    // Draw curves very faintly as guides
-    renderer.drawCharacteristics(displayChars, 'uniform-dim', aResult.evaluate);
-  }
-
-  renderer.drawInitialData(icResult.evaluate, state.xRange);
-
-  // Draw all shock points + shock curve
-  if (result.shocks.length > 0) {
-    renderer.drawShocks(result.shocks, shockCurve);
-  }
-
-  // Status
-  let statusParts = [`${displayChars.length} characteristics`];
-  if (result.shocks.length > 0) {
-    const earliest = result.shocks.reduce((a, b) => a.t < b.t ? a : b);
-    statusParts.push(`${result.shocks.length} crossings | shock at t \u2248 ${earliest.t.toFixed(2)}`);
-  }
-  if (result.warning) statusParts.push(result.warning);
-  setStatus(statusParts.join(' | '));
-
-  // 6. Particles
+  // 5. Particles
   if (state.showParticles) {
-    renderer.initParticles(displayChars, 5);
-    renderer.cacheBackground();
+    const displayChars = getDisplayChars();
+    particleGL.resize(window.innerWidth, window.innerHeight);
+    particleGL.setViewport(state.xRange[0], state.xRange[1], state.tRange[0], state.tRange[1]);
+    particleGL.initParticles(displayChars, 5);
     startAnimation();
   } else {
     stopAnimation();
+    particleGL.clear();
   }
 
-  // 7. Symbolic solutions (async — computed after the picture is drawn)
+  // 6. Symbolic solutions (async, after picture)
   solveCharacteristics(state.a, state.b).then(solutions => {
     const [xTex, uTex] = formatSolutionDisplay(solutions);
     renderSolution(xSolDisplay, xTex);
@@ -127,6 +102,59 @@ function recompute() {
   });
 }
 
+/**
+ * Get display characteristics (resolved if toggle is on).
+ */
+function getDisplayChars() {
+  if (currentState?.resolveShocks && currentShocks.length > 0) {
+    return resolveShocks(currentCharacteristics, currentShocks).resolved;
+  }
+  return currentCharacteristics;
+}
+
+/**
+ * Fast re-render: just redraw at current viewport without retracing.
+ * Used for pan/zoom — instant response.
+ */
+function rerender() {
+  const state = currentState || getState();
+
+  renderer.setViewport(state.xRange[0], state.xRange[1], state.tRange[0], state.tRange[1]);
+  renderer.clear();
+  renderer.drawGrid();
+  renderer.drawAxes();
+
+  const displayChars = getDisplayChars();
+  let shockCurve = [];
+
+  if (state.resolveShocks && currentShocks.length > 0) {
+    shockCurve = resolveShocks(currentCharacteristics, currentShocks).shockCurve;
+  }
+
+  // In particle mode, draw curves very dim
+  if (state.showParticles) {
+    renderer.drawCharacteristics(displayChars, 'uniform-dim', currentAFn);
+  } else {
+    renderer.drawCharacteristics(displayChars, state.colorMode, currentAFn);
+  }
+
+  renderer.drawInitialData(currentICFn, state.xRange);
+
+  if (currentShocks.length > 0) {
+    renderer.drawShocks(currentShocks, shockCurve);
+  }
+
+  // Status
+  let statusParts = [`${displayChars.length} characteristics`];
+  if (currentShocks.length > 0) {
+    const earliest = currentShocks.reduce((a, b) => a.t < b.t ? a : b);
+    statusParts.push(`${currentShocks.length} crossings | shock t\u2248${earliest.t.toFixed(2)}`);
+  }
+  setStatus(statusParts.join(' | '));
+}
+
+// ─── Animation ───
+
 function startAnimation() {
   if (animating) return;
   animating = true;
@@ -134,11 +162,11 @@ function startAnimation() {
 
   function frame(now) {
     if (!animating) return;
-    const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
     lastTime = now;
 
-    renderer.stepParticles(dt, currentCharacteristics);
-    renderer.drawAnimationFrame(currentCharacteristics);
+    const displayChars = getDisplayChars();
+    particleGL.frame(dt, displayChars);
 
     animFrameId = requestAnimationFrame(frame);
   }
@@ -159,8 +187,15 @@ function stopAnimation() {
 function setupPanZoom(canvas) {
   let isPanning = false;
   let lastMouse = null;
+  let recomputeTimer = null;
 
-  // Zoom with mouse wheel
+  // Debounced recompute — retrace after viewport settles
+  function scheduleRecompute() {
+    clearTimeout(recomputeTimer);
+    recomputeTimer = setTimeout(recompute, 300);
+  }
+
+  // Zoom: instant rerender, debounced retrace
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
@@ -170,21 +205,30 @@ function setupPanZoom(canvas) {
 
     const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
 
-    // Zoom centered on cursor position
     const newXMin = worldX - (worldX - renderer.xMin) * zoomFactor;
     const newXMax = worldX + (renderer.xMax - worldX) * zoomFactor;
-    const newTMin = worldT - (worldT - renderer.tMin) * zoomFactor;
+    const newTMin = Math.max(0, worldT - (worldT - renderer.tMin) * zoomFactor);
     const newTMax = worldT + (renderer.tMax - worldT) * zoomFactor;
 
-    // Clamp tMin to >= 0
-    renderer.setViewport(newXMin, newXMax, Math.max(0, newTMin), newTMax);
-    updateViewport(newXMin, newXMax, Math.max(0, newTMin), newTMax);
-    recompute();
+    // Update state immediately
+    currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
+    updateViewport(newXMin, newXMax, newTMin, newTMax);
+
+    // Instant redraw with existing curves
+    rerender();
+
+    // Update particle viewport if animating
+    if (animating) {
+      particleGL.setViewport(newXMin, newXMax, newTMin, newTMax);
+    }
+
+    // Retrace after zoom settles
+    scheduleRecompute();
   }, { passive: false });
 
-  // Pan with middle-click or ctrl+click drag
+  // Pan: instant rerender
   canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
+    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey))) {
       isPanning = true;
       lastMouse = { x: e.clientX, y: e.clientY };
       canvas.style.cursor = 'grabbing';
@@ -198,40 +242,39 @@ function setupPanZoom(canvas) {
     const dy = e.clientY - lastMouse.y;
     lastMouse = { x: e.clientX, y: e.clientY };
 
-    // Convert pixel deltas to world deltas
     const worldDx = -dx / renderer.plotWidth * (renderer.xMax - renderer.xMin);
     const worldDt = dy / renderer.plotHeight * (renderer.tMax - renderer.tMin);
 
+    const newXMin = renderer.xMin + worldDx;
+    const newXMax = renderer.xMax + worldDx;
     const newTMin = Math.max(0, renderer.tMin + worldDt);
     const newTMax = renderer.tMax + worldDt;
 
-    renderer.setViewport(
-      renderer.xMin + worldDx,
-      renderer.xMax + worldDx,
-      newTMin,
-      newTMax
-    );
-    updateViewport(
-      renderer.xMin, renderer.xMax,
-      renderer.tMin, renderer.tMax
-    );
-    recompute();
+    currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
+    updateViewport(newXMin, newXMax, newTMin, newTMax);
+    rerender();
+
+    if (animating) {
+      particleGL.setViewport(newXMin, newXMax, newTMin, newTMax);
+    }
   });
 
   window.addEventListener('mouseup', () => {
     if (isPanning) {
       isPanning = false;
       canvas.style.cursor = '';
+      scheduleRecompute();
     }
   });
 }
 
-// ─── Hover info ───
+// ─── Hover ───
 
 function setupHover(canvas) {
   const hoverInfo = document.getElementById('hover-info');
 
   canvas.addEventListener('mousemove', (e) => {
+    if (e.ctrlKey || e.metaKey) return; // don't hover while panning
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
@@ -242,7 +285,6 @@ function setupHover(canvas) {
       return;
     }
 
-    // Find nearest characteristic point (sample every 5th point for perf)
     let nearest = null;
     let nearestDist = Infinity;
 
@@ -275,7 +317,10 @@ function setupHover(canvas) {
 
 document.addEventListener('DOMContentLoaded', () => {
   const canvas = document.getElementById('main-canvas');
+  const glCanvas = document.getElementById('particle-canvas');
+
   renderer = new Renderer(canvas);
+  particleGL = new ParticleGL(glCanvas);
 
   pdeDisplay = document.getElementById('pde-display');
   charOdeDisplay = document.getElementById('char-ode-display');
@@ -287,7 +332,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setupHover(canvas);
   setupPanZoom(canvas);
 
-  // Debounced resize recompute
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
@@ -295,8 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load first preset
-  const presetSelect = document.getElementById('preset-select');
-  presetSelect.value = '0';
+  document.getElementById('preset-select').value = '0';
   loadPreset(PRESETS[0]);
   recompute();
 });

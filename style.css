@@ -20,8 +20,8 @@ html, body {
   font-size: 13px;
 }
 
-/* Full-screen canvas */
-#main-canvas {
+/* Full-screen canvases (stacked) */
+#main-canvas, #particle-canvas {
   position: fixed;
   top: 0;
   left: 0;
@@ -29,6 +29,9 @@ html, body {
   height: 100%;
   display: block;
 }
+
+#main-canvas { z-index: 0; }
+#particle-canvas { z-index: 1; pointer-events: none; }
 
 /* Floating control panel — anvaka style */
 #controls {
