@@ -1,6 +1,8 @@
 /**
  * Main entry point — orchestrates the full pipeline:
  * UI input → math parsing → KaTeX display → ODE integration → canvas rendering → animation loop
+ *
+ * Priority: render curves first, then compute symbolic solutions in parallel.
  */
 
 import { Renderer } from './renderer.js';
@@ -8,11 +10,13 @@ import { compileExpression, compileInitialData } from './math-pipeline.js';
 import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
 import { traceCharacteristics } from './integrator.js';
 import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
-import { initUI, getState, setStatus, loadPreset } from './ui.js';
+import { initUI, getState, setStatus, loadPreset, updateViewport } from './ui.js';
 import { PRESETS } from './presets.js';
 
 let renderer;
 let currentCharacteristics = [];
+let currentAFn = null;
+let currentColorMode = 'uniform';
 let animating = false;
 let animFrameId = null;
 
@@ -32,24 +36,13 @@ function recompute() {
   const bResult = compileExpression(state.b);
   const icResult = compileInitialData(state.initialData);
 
-  // Mark errors
   if (aResult.error) document.getElementById('input-a').classList.add('error');
   if (bResult.error) document.getElementById('input-b').classList.add('error');
   if (icResult.error) document.getElementById('input-ic').classList.add('error');
 
-  // 2. Update KaTeX displays
+  // 2. Update KaTeX displays (fast, do first)
   renderEquation(pdeDisplay, charOdeDisplay, aResult.latex, bResult.latex);
   renderInitialCondition(icDisplay, icResult.latex);
-
-  // 2b. Symbolic ODE solutions (async, non-blocking)
-  solveCharacteristics(state.a, state.b).then(solutions => {
-    const [xTex, uTex] = formatSolutionDisplay(solutions);
-    renderSolution(xSolDisplay, xTex);
-    renderSolution(uSolDisplay, uTex);
-  }).catch(() => {
-    xSolDisplay.textContent = '';
-    uSolDisplay.textContent = '';
-  });
 
   // 3. Bail if parse errors
   if (aResult.error || bResult.error) {
@@ -57,12 +50,12 @@ function recompute() {
     return;
   }
 
-  // 4. Trace characteristics
+  // 4. Trace characteristics (priority — this draws the picture)
   const dt = 0.01;
   const result = traceCharacteristics({
     aFn: aResult.evaluate,
     bFn: bResult.evaluate,
-    initialDataFn: icResult.evaluate, // null if empty
+    initialDataFn: icResult.evaluate,
     aDepends_u: aResult.dependsOnU,
     numCurves: state.numCurves,
     xRange: state.xRange,
@@ -71,8 +64,10 @@ function recompute() {
   });
 
   currentCharacteristics = result.characteristics;
+  currentAFn = aResult.evaluate;
+  currentColorMode = state.colorMode;
 
-  // 5. Render
+  // 5. Render curves immediately
   renderer.setViewport(state.xRange[0], state.xRange[1], state.tRange[0], state.tRange[1]);
   renderer.clear();
   renderer.drawGrid();
@@ -84,42 +79,47 @@ function recompute() {
     renderer.drawShocks(result.shocks);
   }
 
-  // Status bar
+  // Status
   let statusParts = [`${currentCharacteristics.length} characteristics`];
   if (result.shocks.length > 0) {
     const earliest = result.shocks.reduce((a, b) => a.t < b.t ? a : b);
     statusParts.push(`shock at t \u2248 ${earliest.t.toFixed(2)}`);
   }
-  if (result.warning) {
-    statusParts.push(result.warning);
-  }
+  if (result.warning) statusParts.push(result.warning);
   setStatus(statusParts.join(' | '));
 
   // 6. Particles
   if (state.showParticles) {
-    renderer.initParticles(currentCharacteristics, 3);
+    renderer.initParticles(currentCharacteristics, 5);
     renderer.cacheBackground();
     startAnimation();
   } else {
     stopAnimation();
   }
+
+  // 7. Symbolic solutions (async — computed after the picture is drawn)
+  solveCharacteristics(state.a, state.b).then(solutions => {
+    const [xTex, uTex] = formatSolutionDisplay(solutions);
+    renderSolution(xSolDisplay, xTex);
+    renderSolution(uSolDisplay, uTex);
+  }).catch(() => {
+    if (xSolDisplay) xSolDisplay.textContent = '';
+    if (uSolDisplay) uSolDisplay.textContent = '';
+  });
 }
 
 function startAnimation() {
   if (animating) return;
   animating = true;
-
   let lastTime = performance.now();
 
   function frame(now) {
     if (!animating) return;
-
-    const dt = (now - lastTime) / 1000;
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
     lastTime = now;
 
-    renderer.restoreBackground();
     renderer.stepParticles(dt, currentCharacteristics);
-    renderer.drawParticles(currentCharacteristics);
+    renderer.drawAnimationFrame(currentCharacteristics);
 
     animFrameId = requestAnimationFrame(frame);
   }
@@ -135,6 +135,78 @@ function stopAnimation() {
   }
 }
 
+// ─── Pan & Zoom ───
+
+function setupPanZoom(canvas) {
+  let isPanning = false;
+  let lastMouse = null;
+
+  // Zoom with mouse wheel
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const [worldX, worldT] = renderer.canvasToWorld(cx, cy);
+
+    const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+
+    // Zoom centered on cursor position
+    const newXMin = worldX - (worldX - renderer.xMin) * zoomFactor;
+    const newXMax = worldX + (renderer.xMax - worldX) * zoomFactor;
+    const newTMin = worldT - (worldT - renderer.tMin) * zoomFactor;
+    const newTMax = worldT + (renderer.tMax - worldT) * zoomFactor;
+
+    // Clamp tMin to >= 0
+    renderer.setViewport(newXMin, newXMax, Math.max(0, newTMin), newTMax);
+    updateViewport(newXMin, newXMax, Math.max(0, newTMin), newTMax);
+    recompute();
+  }, { passive: false });
+
+  // Pan with middle-click or ctrl+click drag
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 1 || (e.button === 0 && e.ctrlKey)) {
+      isPanning = true;
+      lastMouse = { x: e.clientX, y: e.clientY };
+      canvas.style.cursor = 'grabbing';
+      e.preventDefault();
+    }
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    const dx = e.clientX - lastMouse.x;
+    const dy = e.clientY - lastMouse.y;
+    lastMouse = { x: e.clientX, y: e.clientY };
+
+    // Convert pixel deltas to world deltas
+    const worldDx = -dx / renderer.plotWidth * (renderer.xMax - renderer.xMin);
+    const worldDt = dy / renderer.plotHeight * (renderer.tMax - renderer.tMin);
+
+    const newTMin = Math.max(0, renderer.tMin + worldDt);
+    const newTMax = renderer.tMax + worldDt;
+
+    renderer.setViewport(
+      renderer.xMin + worldDx,
+      renderer.xMax + worldDx,
+      newTMin,
+      newTMax
+    );
+    updateViewport(
+      renderer.xMin, renderer.xMax,
+      renderer.tMin, renderer.tMax
+    );
+    recompute();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isPanning) {
+      isPanning = false;
+      canvas.style.cursor = '';
+    }
+  });
+}
+
 // ─── Hover info ───
 
 function setupHover(canvas) {
@@ -146,18 +218,19 @@ function setupHover(canvas) {
     const cy = e.clientY - rect.top;
     const [x, t] = renderer.canvasToWorld(cx, cy);
 
-    // Check bounds
     if (x < renderer.xMin || x > renderer.xMax || t < renderer.tMin || t > renderer.tMax) {
       hoverInfo.textContent = '';
       return;
     }
 
-    // Find nearest characteristic point
+    // Find nearest characteristic point (sample every 5th point for perf)
     let nearest = null;
     let nearestDist = Infinity;
 
     for (const char of currentCharacteristics) {
-      for (const p of char.points) {
+      const pts = char.points;
+      for (let i = 0; i < pts.length; i += 5) {
+        const p = pts[i];
         const [pcx, pcy] = renderer.worldToCanvas(p.x, p.t);
         const dist = Math.hypot(pcx - cx, pcy - cy);
         if (dist < nearestDist) {
@@ -193,7 +266,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initUI(recompute);
   setupHover(canvas);
-  window.addEventListener('resize', recompute);
+  setupPanZoom(canvas);
+
+  // Debounced resize recompute
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(recompute, 100);
+  });
 
   // Load first preset
   const presetSelect = document.getElementById('preset-select');

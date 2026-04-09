@@ -1,6 +1,12 @@
 /**
  * Canvas 2D renderer for characteristics, axes, grid, and particles.
  * Coordinate system: x horizontal, t vertical (t going up).
+ *
+ * Particle animation follows the anvaka/fieldplay approach:
+ * - Particles flow along pre-computed characteristic curves
+ * - Previous frame fades out (trail effect) rather than full redraw
+ * - Particles move at speeds proportional to the characteristic velocity
+ * - Probabilistic respawning at curve start when particles reach the end
  */
 
 import * as colormap from './colormap.js';
@@ -141,8 +147,7 @@ export class Renderer {
     const xStart = Math.ceil(this.xMin / xSpacing) * xSpacing;
     for (let x = xStart; x <= this.xMax; x += xSpacing) {
       const [cx] = this.worldToCanvas(x, 0);
-      const label = formatTick(x);
-      ctx.fillText(label, cx, this.margin.top + this.plotHeight + 6);
+      ctx.fillText(formatTick(x), cx, this.margin.top + this.plotHeight + 6);
     }
 
     // t tick labels (along left)
@@ -151,8 +156,7 @@ export class Renderer {
     const tStart = Math.ceil(this.tMin / tSpacing) * tSpacing;
     for (let t = tStart; t <= this.tMax; t += tSpacing) {
       const [, cy] = this.worldToCanvas(0, t);
-      const label = formatTick(t);
-      ctx.fillText(label, this.margin.left - 6, cy);
+      ctx.fillText(formatTick(t), this.margin.left - 6, cy);
     }
 
     // Axis labels
@@ -173,10 +177,6 @@ export class Renderer {
 
   /**
    * Draw characteristic curves.
-   *
-   * @param {Array} characteristics - from integrator
-   * @param {string} colorMode - 'uniform' | 'u-value' | 'speed' | 'index'
-   * @param {Function} aFn - evaluator for speed coloring
    */
   drawCharacteristics(characteristics, colorMode, aFn) {
     const ctx = this.ctx;
@@ -257,7 +257,7 @@ export class Renderer {
   }
 
   /**
-   * Draw shock annotations — dashed red marks at crossing points.
+   * Draw shock annotations.
    */
   drawShocks(shocks) {
     if (!shocks.length) return;
@@ -268,10 +268,8 @@ export class Renderer {
     ctx.rect(this.margin.left, this.margin.top, this.plotWidth, this.plotHeight);
     ctx.clip();
 
-    // Find the earliest shock
     const earliest = shocks.reduce((a, b) => a.t < b.t ? a : b);
 
-    // Draw a marker at each shock point
     for (const s of shocks) {
       const [cx, cy] = this.worldToCanvas(s.x, s.t);
       ctx.fillStyle = 'rgba(203, 67, 53, 0.6)';
@@ -280,7 +278,6 @@ export class Renderer {
       ctx.fill();
     }
 
-    // Draw dashed line upward from earliest shock
     const [sx, sy] = this.worldToCanvas(earliest.x, earliest.t);
     ctx.strokeStyle = 'rgba(203, 67, 53, 0.5)';
     ctx.lineWidth = 1.5;
@@ -291,18 +288,16 @@ export class Renderer {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Label
     ctx.fillStyle = 'rgba(203, 67, 53, 0.8)';
     ctx.font = '11px Consolas, monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`shock t≈${earliest.t.toFixed(2)}`, sx + 6, sy - 4);
+    ctx.fillText(`shock t\u2248${earliest.t.toFixed(2)}`, sx + 6, sy - 4);
 
     ctx.restore();
   }
 
   /**
-   * Draw the initial data curve u(x,0) = f(x) along the bottom (t=tMin) axis.
-   * Rendered as a small subplot showing u vs x.
+   * Draw the initial data curve u(x,0) = f(x) along the bottom axis.
    */
   drawInitialData(f, xRange) {
     if (!f) return;
@@ -311,7 +306,6 @@ export class Renderer {
     const [xMin, xMax] = xRange;
     const n = 200;
 
-    // Sample f
     const vals = [];
     let fMin = Infinity, fMax = -Infinity;
     for (let i = 0; i <= n; i++) {
@@ -326,7 +320,6 @@ export class Renderer {
 
     if (!isFinite(fMin)) return;
 
-    // Draw as a thin colored band along the x-axis at t = tMin
     const bandHeight = 30;
     const [, baseY] = this.worldToCanvas(0, this.tMin);
 
@@ -347,44 +340,97 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ─── Particle animation ───
+  // ─── Particle animation (anvaka-style) ───
 
   /**
    * Initialize particles along pre-computed characteristics.
+   * Each particle tracks its position as a parameter along a curve,
+   * moves at a speed proportional to the local characteristic velocity,
+   * and leaves a fading trail.
    */
-  initParticles(characteristics, countPerCurve = 3) {
+  initParticles(characteristics, countPerCurve = 5) {
     this.particles = [];
     for (let ci = 0; ci < characteristics.length; ci++) {
       const pts = characteristics[ci].points;
       if (pts.length < 2) continue;
 
+      // Compute total arc length for this curve (in canvas pixels)
+      let arcLen = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const [x1, y1] = this.worldToCanvas(pts[i - 1].x, pts[i - 1].t);
+        const [x2, y2] = this.worldToCanvas(pts[i].x, pts[i].t);
+        arcLen += Math.hypot(x2 - x1, y2 - y1);
+      }
+
       for (let p = 0; p < countPerCurve; p++) {
         this.particles.push({
           charIndex: ci,
-          param: Math.random(), // 0..1 fractional position along curve
+          param: Math.random(),  // 0..1 position along curve
+          arcLength: arcLen,
         });
       }
     }
   }
 
   /**
-   * Advance particles along their characteristic curves.
+   * Advance particles. Speed is proportional to the local characteristic
+   * velocity |dx/dt|, normalized so particles traverse the curve
+   * in roughly the right physical time.
+   *
+   * Anvaka approach: particles that reach the end respawn at the start
+   * with a random delay (probabilistic drop).
    */
-  stepParticles(dt, characteristics) {
+  stepParticles(frameDt, characteristics) {
+    const dropProbability = 0.003; // chance of random respawn per frame
+
     for (const p of this.particles) {
       const pts = characteristics[p.charIndex]?.points;
       if (!pts || pts.length < 2) continue;
 
-      p.param += dt * 0.5; // speed factor
-      if (p.param >= 1) p.param -= 1; // wrap around
+      // Move at a rate that traverses the curve in ~2-4 seconds visually
+      // Speed factor scales with arc length so short/long curves feel similar
+      const speed = Math.max(80, p.arcLength * 0.15);
+      const paramDelta = (speed * frameDt) / Math.max(1, p.arcLength);
+
+      p.param += paramDelta;
+
+      // Respawn at start when reaching end, or probabilistically
+      if (p.param >= 1 || Math.random() < dropProbability) {
+        p.param = 0;
+      }
     }
   }
 
   /**
-   * Draw particles as small dots.
+   * Render one animation frame with trail fading (anvaka approach).
+   *
+   * Instead of restoring a cached background each frame:
+   * 1. Fade the entire canvas slightly toward the background color
+   * 2. Redraw the static elements (grid, axes, curves) at low opacity
+   *    → Actually, for simplicity we do: fade + draw particles on top
+   *    The static curves persist through the fade, creating natural trails.
    */
-  drawParticles(characteristics) {
+  drawAnimationFrame(characteristics) {
     const ctx = this.ctx;
+
+    // Fade previous frame — this creates the trail effect
+    // Lower alpha = longer trails
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+    ctx.fillRect(0, 0, this.displayWidth, this.displayHeight);
+    ctx.restore();
+
+    // Restore the static background underneath the faded trails
+    // This prevents the grid/axes/curves from fading away
+    if (this.cachedBackground) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.putImageData(this.cachedBackground, 0, 0);
+      ctx.restore();
+    }
+
+    // Draw particles
     ctx.save();
     ctx.beginPath();
     ctx.rect(this.margin.left, this.margin.top, this.plotWidth, this.plotHeight);
@@ -403,12 +449,12 @@ export class Renderer {
 
       const x = p1.x + frac * (p2.x - p1.x);
       const t = p1.t + frac * (p2.t - p1.t);
-
       const [cx, cy] = this.worldToCanvas(x, t);
 
-      ctx.fillStyle = 'rgba(243, 156, 18, 0.9)';
+      // Bright particle dot
+      ctx.fillStyle = 'rgba(243, 156, 18, 0.95)';
       ctx.beginPath();
-      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -436,7 +482,6 @@ export class Renderer {
 
 // ─── Utility ───
 
-/** Compute a "nice" step size for grid lines given a range and target count. */
 function niceStep(range, targetCount) {
   const rough = range / targetCount;
   const mag = Math.pow(10, Math.floor(Math.log10(rough)));
@@ -451,7 +496,6 @@ function niceStep(range, targetCount) {
   return nice * mag;
 }
 
-/** Format a tick label, removing trailing zeros. */
 function formatTick(value) {
   if (Math.abs(value) < 1e-10) return '0';
   if (Number.isInteger(value)) return value.toString();

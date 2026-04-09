@@ -112,6 +112,16 @@ export function getState() {
 }
 
 /**
+ * Update viewport controls from pan/zoom.
+ */
+export function updateViewport(xMin, xMax, tMin, tMax) {
+  elements.xMin.value = xMin.toFixed(1);
+  elements.xMax.value = xMax.toFixed(1);
+  elements.tMin.value = tMin.toFixed(1);
+  elements.tMax.value = tMax.toFixed(1);
+}
+
+/**
  * Update the status bar text.
  */
 export function setStatus(text) {
