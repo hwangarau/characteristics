@@ -334,40 +334,54 @@ export class Renderer {
   }
 
   /**
-   * Draw the analytically/numerically computed shock curve (R-H).
-   * This is independent of the drawn characteristics — always accurate.
+   * Draw the shock curve, left caustic, and right caustic.
+   * All three emanate from the cusp at t*.
+   * Precomputed via ODE stepping — independent of zoom/characteristics.
    */
-  drawShockCurve(curve) {
-    if (curve.length < 2) return;
-
+  drawShockSystem(shockCurve, leftCaustic, rightCaustic) {
     const ctx = this.ctx;
     ctx.save();
     ctx.beginPath();
     ctx.rect(this.margin.left, this.margin.top, this.plotWidth, this.plotHeight);
     ctx.clip();
 
-    // Bold shock line
-    ctx.strokeStyle = 'rgba(220, 80, 60, 0.9)';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    const [x0, y0] = this.worldToCanvas(curve[0].x, curve[0].t);
-    ctx.moveTo(x0, y0);
-    for (let i = 1; i < curve.length; i++) {
-      const [x, y] = this.worldToCanvas(curve[i].x, curve[i].t);
-      ctx.lineTo(x, y);
+    // Helper to draw a polyline
+    const drawCurve = (pts, color, width, dash) => {
+      if (pts.length < 2) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.setLineDash(dash || []);
+      ctx.beginPath();
+      const [x0, y0] = this.worldToCanvas(pts[0].x, pts[0].t);
+      ctx.moveTo(x0, y0);
+      for (let i = 1; i < pts.length; i++) {
+        const [x, y] = this.worldToCanvas(pts[i].x, pts[i].t);
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+
+    // Caustics — dashed, semi-transparent
+    drawCurve(leftCaustic, 'rgba(243, 156, 18, 0.5)', 1.5, [4, 3]);
+    drawCurve(rightCaustic, 'rgba(243, 156, 18, 0.5)', 1.5, [4, 3]);
+
+    // Shock curve — bold red
+    drawCurve(shockCurve, 'rgba(220, 80, 60, 0.9)', 2.5);
+
+    // Cusp marker
+    if (shockCurve.length > 0) {
+      const [cx, cy] = this.worldToCanvas(shockCurve[0].x, shockCurve[0].t);
+      ctx.fillStyle = 'rgba(220, 80, 60, 0.9)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Label
+      ctx.font = '11px Consolas, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`t* \u2248 ${shockCurve[0].t.toFixed(2)}`, cx + 8, cy - 6);
     }
-    ctx.stroke();
-
-    // Start marker
-    ctx.fillStyle = 'rgba(220, 80, 60, 0.9)';
-    ctx.beginPath();
-    ctx.arc(x0, y0, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Label
-    ctx.font = '11px Consolas, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`t* \u2248 ${curve[0].t.toFixed(2)}`, x0 + 8, y0 - 6);
 
     ctx.restore();
   }

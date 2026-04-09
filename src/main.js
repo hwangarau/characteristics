@@ -21,6 +21,8 @@ let particleGL;
 let currentCharacteristics = [];
 let currentShocks = [];
 let currentShockCurve = [];
+let currentLeftCaustic = [];
+let currentRightCaustic = [];
 let currentAFn = null;
 let currentICFn = null;
 let currentState = null;
@@ -91,6 +93,8 @@ function recompute() {
     aDependsX, aDependsT, state.xRange, state.tRange
   );
   currentShockCurve = shockResult.shockCurve;
+  currentLeftCaustic = shockResult.leftCaustic || [];
+  currentRightCaustic = shockResult.rightCaustic || [];
 
   // 4. Render
   rerender();
@@ -155,7 +159,7 @@ function rerender() {
     renderer.drawShocks(currentShocks);
   }
   if (currentShockCurve.length > 0) {
-    renderer.drawShockCurve(currentShockCurve);
+    renderer.drawShockSystem(currentShockCurve, currentLeftCaustic, currentRightCaustic);
   }
 
   // Status
