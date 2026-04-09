@@ -259,9 +259,9 @@ export class Renderer {
   }
 
   /**
-   * Draw shock annotations: all crossing points + optional shock curve.
+   * Draw shock annotations: all crossing points as dots.
    */
-  drawShocks(shocks, shockCurve = []) {
+  drawShocks(shocks) {
     if (!shocks.length) return;
 
     const ctx = this.ctx;
@@ -270,34 +270,19 @@ export class Renderer {
     ctx.rect(this.margin.left, this.margin.top, this.plotWidth, this.plotHeight);
     ctx.clip();
 
-    const earliest = shocks.reduce((a, b) => a.t < b.t ? a : b);
-
-    // Draw all crossing points
+    // Draw all crossing points as small red dots
     for (const s of shocks) {
       const [cx, cy] = this.worldToCanvas(s.x, s.t);
-      ctx.fillStyle = 'rgba(203, 67, 53, 0.4)';
+      ctx.fillStyle = 'rgba(220, 80, 60, 0.5)';
       ctx.beginPath();
       ctx.arc(cx, cy, 2, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Draw shock curve if resolved
-    if (shockCurve.length >= 2) {
-      ctx.strokeStyle = 'rgba(203, 67, 53, 0.9)';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      const [sx0, sy0] = this.worldToCanvas(shockCurve[0].x, shockCurve[0].t);
-      ctx.moveTo(sx0, sy0);
-      for (let i = 1; i < shockCurve.length; i++) {
-        const [sx, sy] = this.worldToCanvas(shockCurve[i].x, shockCurve[i].t);
-        ctx.lineTo(sx, sy);
-      }
-      ctx.stroke();
-    }
-
     // Label earliest shock
+    const earliest = shocks.reduce((a, b) => a.t < b.t ? a : b);
     const [sx, sy] = this.worldToCanvas(earliest.x, earliest.t);
-    ctx.fillStyle = 'rgba(203, 67, 53, 0.8)';
+    ctx.fillStyle = 'rgba(220, 80, 60, 0.85)';
     ctx.font = '11px Consolas, monospace';
     ctx.textAlign = 'left';
     ctx.fillText(`shock t\u2248${earliest.t.toFixed(2)}`, sx + 6, sy - 4);

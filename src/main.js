@@ -12,7 +12,7 @@ import { compileExpression, compileInitialData } from './math-pipeline.js';
 import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
 import { traceCharacteristics, resolveShocks } from './integrator.js';
 import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
-import { initUI, getState, setStatus, loadPreset, updateViewport } from './ui.js';
+import { initUI, getState, setStatus, loadPreset, updateViewport, setZoomLevel, getZoomControls } from './ui.js';
 import { PRESETS } from './presets.js';
 
 let renderer;
@@ -22,6 +22,8 @@ let currentShocks = [];
 let currentAFn = null;
 let currentICFn = null;
 let currentState = null;
+let defaultViewport = null; // for recenter
+let zoomScale = 1.0;
 let animating = false;
 let animFrameId = null;
 
@@ -125,12 +127,6 @@ function rerender() {
   renderer.drawAxes();
 
   const displayChars = getDisplayChars();
-  let shockCurve = [];
-
-  if (state.resolveShocks && currentShocks.length > 0) {
-    shockCurve = resolveShocks(currentCharacteristics, currentShocks).shockCurve;
-  }
-
   // In particle mode, draw curves very dim
   if (state.showParticles) {
     renderer.drawCharacteristics(displayChars, 'uniform-dim', currentAFn);
@@ -141,7 +137,7 @@ function rerender() {
   renderer.drawInitialData(currentICFn, state.xRange);
 
   if (currentShocks.length > 0) {
-    renderer.drawShocks(currentShocks, shockCurve);
+    renderer.drawShocks(currentShocks);
   }
 
   // Status

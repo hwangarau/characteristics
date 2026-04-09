@@ -23,6 +23,10 @@ export function initUI(onRecompute) {
   elements.colorMode = $('color-mode');
   elements.showParticles = $('show-particles');
   elements.resolveShocks = $('resolve-shocks');
+  elements.zoomInBtn = $('zoom-in-btn');
+  elements.zoomOutBtn = $('zoom-out-btn');
+  elements.recenterBtn = $('recenter-btn2');
+  elements.zoomLevel = $('zoom-level');
   elements.statusText = $('status-text');
 
   // Populate preset dropdown
@@ -73,6 +77,8 @@ export function initUI(onRecompute) {
   elements.showParticles.addEventListener('change', onRecompute);
   elements.resolveShocks.addEventListener('change', onRecompute);
 
+  // Zoom/recenter buttons are wired by main.js via getZoomControls()
+
   // Preset dropdown
   elements.presetSelect.addEventListener('change', () => {
     const idx = parseInt(elements.presetSelect.value);
@@ -122,6 +128,26 @@ export function updateViewport(xMin, xMax, tMin, tMax) {
   elements.xMax.value = xMax.toFixed(1);
   elements.tMin.value = tMin.toFixed(1);
   elements.tMax.value = tMax.toFixed(1);
+}
+
+/**
+ * Update the zoom level display.
+ */
+export function setZoomLevel(level) {
+  if (elements.zoomLevel) {
+    elements.zoomLevel.textContent = `${level.toFixed(1)}x`;
+  }
+}
+
+/**
+ * Get zoom control elements for main.js to wire.
+ */
+export function getZoomControls() {
+  return {
+    zoomIn: elements.zoomInBtn,
+    zoomOut: elements.zoomOutBtn,
+    recenter: elements.recenterBtn,
+  };
 }
 
 /**

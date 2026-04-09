@@ -166,6 +166,18 @@ input[type="range"] {
   line-height: 1.4;
 }
 
+button {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+button:hover { border-color: var(--accent); }
+
 /* Collapsible settings */
 details summary {
   font-size: 11px;
@@ -195,6 +207,36 @@ details summary:hover { color: var(--text); }
   font-family: 'SF Mono', Consolas, monospace;
   pointer-events: none;
   z-index: 5;
+}
+
+/* Zoom controls */
+#zoom-controls {
+  position: fixed;
+  bottom: 32px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 10;
+}
+
+#zoom-controls button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+#zoom-level {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', Consolas, monospace;
+  min-width: 32px;
+  text-align: center;
 }
 
 /* Status bar */
