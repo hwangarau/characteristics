@@ -1,69 +1,55 @@
 /**
  * Shock curve computation — independent of drawn characteristics.
  *
- * For u_t + a(u) u_x = 0 with u(x,0) = f(x):
+ * For u_t + a(u) u_x = 0, u(x,0) = f(x), characteristic map:
+ *   g(x₀, t) = x₀ + a(f(x₀)) · t
  *
- * 1. Breaking condition: characteristics cross when
- *      ∂x/∂x₀ = 1 + a'(f(x₀)) · f'(x₀) · t = 0
- *    so t*(x₀) = -1 / [a'(f(x₀)) · f'(x₀)]
- *    Breaking time: t* = min over x₀ where a'(f)·f' < 0
+ * Breaking time: t* = min { -1/[a'(f(x₀))·f'(x₀)] } where product < 0
  *
- * 2. From t* onward, shock position s(t) evolves by Rankine-Hugoniot:
- *      ds/dt = [F(u_L) - F(u_R)] / [u_L - u_R]
- *    where F(u) = ∫a(u) du is the flux.
- *
- * 3. u_L and u_R are found by solving x₀ + a(f(x₀))·t = s(t) for x₀
- *    on either side of the shock.
+ * Shock position at time t: find s such that the equal-area rule holds
+ * in the multi-valued region. Equivalently, step using R-H:
+ *   ds/dt = [F(u_L) - F(u_R)] / [u_L - u_R]
+ * where F(u) = ∫a(u)du.
  */
 
-/**
- * Compute the breaking time and shock curve.
- *
- * @param {Function} aFn - (scope) => number, the characteristic speed a(u,x,t)
- * @param {Function} icFn - (x) => number, initial data f(x)
- * @param {boolean} aDependsOnX - if a depends on x, we can't do the simple analysis
- * @param {boolean} aDependsOnT - if a depends on t, we can't do the simple analysis
- * @param {number[]} xRange - seed range for scanning
- * @param {number[]} tRange - time range
- * @returns {{ tStar: number|null, x0Star: number|null, shockCurve: Array<{x: number, t: number}> }}
- */
 export function computeShockCurve(aFn, icFn, aDependsOnX, aDependsOnT, xRange, tRange) {
-  // Only works for autonomous a(u) — if a depends on x or t, skip
   if (aDependsOnX || aDependsOnT || !icFn) {
     return { tStar: null, x0Star: null, shockCurve: [] };
   }
 
-  const [xMin, xMax] = xRange;
+  const h = 0.001;
   const tMax = tRange[1];
-  const h = 0.001; // for numerical differentiation
-  const N = 500;   // sample points for scanning
+  const scanMin = xRange[0] - (xRange[1] - xRange[0]);
+  const scanMax = xRange[1] + (xRange[1] - xRange[0]);
 
-  // Numerically compute a'(u) at a given u
   function aPrime(u) {
-    const uPlus = aFn({ u: u + h, x: 0, t: 0 });
-    const uMinus = aFn({ u: u - h, x: 0, t: 0 });
-    return (uPlus - uMinus) / (2 * h);
+    return (aFn({ u: u + h, x: 0, t: 0 }) - aFn({ u: u - h, x: 0, t: 0 })) / (2 * h);
   }
 
-  // Scan for breaking time: t*(x₀) = -1 / [a'(f(x₀)) · f'(x₀)]
+  function charMap(x0, t) {
+    return x0 + aFn({ u: icFn(x0), x: 0, t: 0 }) * t;
+  }
+
+  function flux(u) {
+    const M = 40;
+    const du = u / M;
+    let s = 0;
+    for (let i = 0; i < M; i++) {
+      s += (aFn({ u: i * du, x: 0, t: 0 }) + aFn({ u: (i + 1) * du, x: 0, t: 0 })) / 2 * du;
+    }
+    return s;
+  }
+
+  // 1. Find t*
   let tStar = Infinity;
   let x0Star = null;
-
-  // Extend scan range beyond viewport to catch shocks that start outside view
-  const scanMin = xMin - (xMax - xMin) * 0.5;
-  const scanMax = xMax + (xMax - xMin) * 0.5;
+  const N = 800;
 
   for (let i = 0; i <= N; i++) {
     const x0 = scanMin + (scanMax - scanMin) * i / N;
     const f0 = icFn(x0);
-
-    // f'(x₀) numerically
     const fPrime = (icFn(x0 + h) - icFn(x0 - h)) / (2 * h);
-
-    // a'(f(x₀))
-    const aPrimeVal = aPrime(f0);
-
-    const product = aPrimeVal * fPrime;
+    const product = aPrime(f0) * fPrime;
 
     if (product < -1e-10) {
       const tBreak = -1 / product;
@@ -78,89 +64,109 @@ export function computeShockCurve(aFn, icFn, aDependsOnX, aDependsOnT, xRange, t
     return { tStar: null, x0Star: null, shockCurve: [] };
   }
 
-  // Shock position at t*
-  const f0Star = icFn(x0Star);
-  const aAtStar = aFn({ u: f0Star, x: 0, t: 0 });
-  let shockX = x0Star + aAtStar * tStar;
+  // 2. Trace shock curve from t* to tMax
+  //    At each t, find the multi-valued region and apply R-H.
+  const dt = 0.02;
+  const shockCurve = [];
 
-  // Trace shock curve forward from t* using Rankine-Hugoniot
-  const shockCurve = [{ x: shockX, t: tStar }];
-  const dt = 0.01;
+  // Initial shock position: at t = t*, the fold is just forming.
+  // Start just after t* and find the shock by equal-area.
+  let shockX = charMap(x0Star, tStar);
+  shockCurve.push({ x: shockX, t: tStar });
 
   for (let t = tStar + dt; t <= tMax; t += dt) {
-    // Find u_L and u_R: solve x₀ + a(f(x₀))·t = shockX for x₀
-    // u_L comes from the left (larger u for Burgers-type)
-    // u_R comes from the right (smaller u)
-    const { uL, uR } = findShockStates(aFn, icFn, shockX, t, scanMin, scanMax);
+    // Find multi-valued region: where g(x0, t) is not monotonic
+    // Scan g and find the fold boundaries
+    const Ns = 600;
+    let gPrev = charMap(scanMin, t);
+    let foldLeft = null, foldRight = null;
+    let foldXmin = Infinity, foldXmax = -Infinity;
 
-    if (uL === null || uR === null || Math.abs(uL - uR) < 1e-10) break;
+    for (let i = 1; i <= Ns; i++) {
+      const x0 = scanMin + (scanMax - scanMin) * i / Ns;
+      const g = charMap(x0, t);
+      if (g < gPrev && foldLeft === null) {
+        // g started decreasing — fold begins
+        foldLeft = scanMin + (scanMax - scanMin) * (i - 1) / Ns;
+      }
+      if (g < gPrev) {
+        foldRight = x0;
+      }
+      foldXmin = Math.min(foldXmin, g);
+      foldXmax = Math.max(foldXmax, g);
+      gPrev = g;
+    }
 
-    // Rankine-Hugoniot: ds/dt = [F(u_L) - F(u_R)] / [u_L - u_R]
-    // where F(u) = ∫a(u) du is the flux
-    // For general a(u), approximate F using the trapezoidal rule
-    const fluxL = numericalFlux(aFn, uL);
-    const fluxR = numericalFlux(aFn, uR);
-    const shockSpeed = (fluxL - fluxR) / (uL - uR);
+    if (foldLeft === null) {
+      // No fold — shock has consumed all the wave
+      break;
+    }
 
-    shockX += shockSpeed * dt;
+    // The shock position s must be in [g(foldRight), g(foldLeft)]
+    // i.e., in the range of x values where g is multi-valued.
+    const gAtFoldLeft = charMap(foldLeft, t);
+    const gAtFoldRight = charMap(foldRight, t);
+    const sMin = Math.min(gAtFoldLeft, gAtFoldRight);
+    const sMax = Math.max(gAtFoldLeft, gAtFoldRight);
+
+    // Find all x0 roots of g(x0,t) = s for a candidate s
+    // Then pick s so that R-H is satisfied.
+    // Use the previous shock speed to estimate, then correct.
+
+    // Find roots of g(x0,t) = shockX
+    const roots = findRoots(x0 => charMap(x0, t) - shockX, scanMin, scanMax, 500);
+
+    if (roots.length >= 2) {
+      const uL = icFn(roots[0]);
+      const uR = icFn(roots[roots.length - 1]);
+
+      if (Math.abs(uL - uR) > 1e-8) {
+        const speed = (flux(uL) - flux(uR)) / (uL - uR);
+        shockX += speed * dt;
+      } else {
+        shockX += aFn({ u: uL, x: 0, t: 0 }) * dt;
+      }
+    } else if (roots.length === 1) {
+      // Shock has moved outside the multi-valued region at this position.
+      // Nudge shockX toward the fold center and retry.
+      const foldCenter = (sMin + sMax) / 2;
+      shockX = foldCenter;
+      const roots2 = findRoots(x0 => charMap(x0, t) - shockX, scanMin, scanMax, 500);
+      if (roots2.length >= 2) {
+        const uL = icFn(roots2[0]);
+        const uR = icFn(roots2[roots2.length - 1]);
+        if (Math.abs(uL - uR) > 1e-8) {
+          const speed = (flux(uL) - flux(uR)) / (uL - uR);
+          shockX += speed * dt;
+        }
+      }
+    } else {
+      break;
+    }
+
     shockCurve.push({ x: shockX, t });
   }
 
   return { tStar, x0Star, shockCurve };
 }
 
-/**
- * Find u_L and u_R on either side of the shock at position (shockX, t).
- * Solve x₀ + a(f(x₀))·t = shockX for x₀, finding the leftmost and rightmost roots.
- */
-function findShockStates(aFn, icFn, shockX, t, scanMin, scanMax) {
-  const N = 300;
+function findRoots(f, a, b, N) {
   const roots = [];
-
-  for (let i = 0; i < N; i++) {
-    const x0a = scanMin + (scanMax - scanMin) * i / N;
-    const x0b = scanMin + (scanMax - scanMin) * (i + 1) / N;
-
-    const fa = x0a + aFn({ u: icFn(x0a), x: 0, t: 0 }) * t - shockX;
-    const fb = x0b + aFn({ u: icFn(x0b), x: 0, t: 0 }) * t - shockX;
-
-    if (fa * fb <= 0) {
-      // Bisect to find root
-      let lo = x0a, hi = x0b;
-      for (let j = 0; j < 20; j++) {
+  let fPrev = f(a);
+  for (let i = 1; i <= N; i++) {
+    const x = a + (b - a) * i / N;
+    const fx = f(x);
+    if (fPrev * fx <= 0) {
+      let lo = a + (b - a) * (i - 1) / N, hi = x, flo = fPrev;
+      for (let j = 0; j < 30; j++) {
         const mid = (lo + hi) / 2;
-        const fmid = mid + aFn({ u: icFn(mid), x: 0, t: 0 }) * t - shockX;
-        if (fmid * fa <= 0) hi = mid;
-        else lo = mid;
+        const fm = f(mid);
+        if (fm * flo <= 0) hi = mid;
+        else { lo = mid; flo = fm; }
       }
       roots.push((lo + hi) / 2);
     }
+    fPrev = fx;
   }
-
-  if (roots.length < 2) return { uL: null, uR: null };
-
-  // u_L from the leftmost root (usually the larger u), u_R from the rightmost
-  const uL = icFn(roots[0]);
-  const uR = icFn(roots[roots.length - 1]);
-
-  return { uL, uR };
-}
-
-/**
- * Numerical flux F(u) = ∫₀ᵘ a(s) ds, approximated by trapezoidal rule.
- */
-function numericalFlux(aFn, u) {
-  const N = 50;
-  const du = u / N;
-  let sum = 0;
-
-  for (let i = 0; i < N; i++) {
-    const s0 = i * du;
-    const s1 = (i + 1) * du;
-    const a0 = aFn({ u: s0, x: 0, t: 0 });
-    const a1 = aFn({ u: s1, x: 0, t: 0 });
-    sum += (a0 + a1) / 2 * du;
-  }
-
-  return sum;
+  return roots;
 }

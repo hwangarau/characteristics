@@ -194,40 +194,49 @@ export function traceCharacteristics(opts) {
 export function resolveShocks(chars, _shocks) {
   if (chars.length < 2) return { resolved: chars, shockCurve: [] };
 
-  // Find earliest crossing time per characteristic
-  const cutoffTime = new Array(chars.length).fill(Infinity);
-  const allCrossings = [];
+  const n = chars.length;
+  const cutoffTime = new Array(n).fill(Infinity);
 
   // Find the minimum number of points across all curves
   const minLen = Math.min(...chars.map(c => c.points.length));
   if (minLen < 2) return { resolved: chars, shockCurve: [] };
 
-  // At each time step, check all pairs for crossing
-  // We use the initial x0 ordering and track swaps
-  const indices = chars.map((_, i) => i);
-  indices.sort((a, b) => chars[a].x0 - chars[b].x0);
+  // At each time step, sort ALL characteristics by their current x position.
+  // Any adjacent pair (in current-x order) that swaps between step k and k+1
+  // has crossed — record the crossing time for both.
+  // Also: if a characteristic is already cut off, skip it.
 
   for (let k = 0; k < minLen - 1; k++) {
-    for (let ii = 0; ii < indices.length - 1; ii++) {
-      const a = indices[ii];
-      const b = indices[ii + 1];
+    // Build list of (charIndex, x at step k) for curves still alive
+    const alive = [];
+    for (let i = 0; i < n; i++) {
+      const pts = chars[i].points;
+      if (k >= pts.length) continue;
+      if (pts[k].t > cutoffTime[i]) continue; // already truncated
+      alive.push({ idx: i, xK: pts[k].x });
+    }
 
-      const ptsA = chars[a].points;
-      const ptsB = chars[b].points;
-      if (k >= ptsA.length - 1 || k >= ptsB.length - 1) continue;
+    // Sort by current x position
+    alive.sort((a, b) => a.xK - b.xK);
+
+    // Check adjacent pairs for crossing at step k → k+1
+    for (let ii = 0; ii < alive.length - 1; ii++) {
+      const ai = alive[ii].idx;
+      const bi = alive[ii + 1].idx;
+
+      const ptsA = chars[ai].points;
+      const ptsB = chars[bi].points;
+      if (k + 1 >= ptsA.length || k + 1 >= ptsB.length) continue;
 
       const diffK = ptsA[k].x - ptsB[k].x;
       const diffK1 = ptsA[k + 1].x - ptsB[k + 1].x;
 
       if (diffK * diffK1 < 0) {
-        // Crossing detected
         const alpha = diffK / (diffK - diffK1);
         const tCross = ptsA[k].t + alpha * (ptsA[k + 1].t - ptsA[k].t);
-        const xCross = ptsA[k].x + alpha * (ptsA[k + 1].x - ptsA[k].x);
 
-        cutoffTime[a] = Math.min(cutoffTime[a], tCross);
-        cutoffTime[b] = Math.min(cutoffTime[b], tCross);
-        allCrossings.push({ x: xCross, t: tCross });
+        cutoffTime[ai] = Math.min(cutoffTime[ai], tCross);
+        cutoffTime[bi] = Math.min(cutoffTime[bi], tCross);
       }
     }
   }
