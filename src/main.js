@@ -81,7 +81,8 @@ function recompute() {
   // 4. Render
   rerender();
 
-  // 5. Particles
+  // 5. Particles — always stop first, then restart if needed
+  stopAnimation();
   if (state.showParticles) {
     const displayChars = getDisplayChars();
     particleGL.resize(window.innerWidth, window.innerHeight);
@@ -89,7 +90,6 @@ function recompute() {
     particleGL.initParticles(displayChars, state.particlesPerCurve || 5);
     startAnimation();
   } else {
-    stopAnimation();
     particleGL.clear();
   }
 
@@ -135,6 +135,7 @@ function rerender() {
   }
 
   renderer.drawInitialData(currentICFn, state.xRange);
+  renderer.drawDomainBounds(state.domainType, state.domainA, state.domainB);
 
   if (currentShocks.length > 0) {
     renderer.drawShocks(currentShocks);

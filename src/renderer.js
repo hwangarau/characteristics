@@ -176,6 +176,49 @@ export class Renderer {
   }
 
   /**
+   * Draw domain boundary lines (bold vertical lines at x=a and/or x=b).
+   */
+  drawDomainBounds(domainType, a, b) {
+    if (domainType === 'R') return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(243, 156, 18, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+
+    if (domainType === 'a-inf' || domainType === 'a-b') {
+      const [cx] = this.worldToCanvas(a, 0);
+      ctx.beginPath();
+      ctx.moveTo(cx, this.margin.top);
+      ctx.lineTo(cx, this.margin.top + this.plotHeight);
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = 'rgba(243, 156, 18, 0.7)';
+      ctx.font = '11px Consolas, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`x=${a}`, cx + 4, this.margin.top + 12);
+    }
+
+    if (domainType === 'inf-b' || domainType === 'a-b') {
+      const [cx] = this.worldToCanvas(b, 0);
+      ctx.beginPath();
+      ctx.moveTo(cx, this.margin.top);
+      ctx.lineTo(cx, this.margin.top + this.plotHeight);
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(243, 156, 18, 0.7)';
+      ctx.font = '11px Consolas, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(`x=${b}`, cx - 4, this.margin.top + 12);
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /**
    * Draw characteristic curves.
    */
   drawCharacteristics(characteristics, colorMode, aFn) {

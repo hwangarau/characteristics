@@ -150,6 +150,13 @@ input[type="range"] {
 .range-row label { flex: 1; }
 .range-row input[type="number"] { width: 100%; }
 
+.domain-row {
+  display: flex;
+  gap: 6px;
+}
+.domain-row label { flex: 1; }
+.domain-row select, .domain-row input { width: 100%; }
+
 .checkbox-label {
   flex-direction: row !important;
   align-items: center;

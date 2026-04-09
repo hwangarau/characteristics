@@ -14,6 +14,13 @@ export function initUI(onRecompute) {
   elements.inputIC = $('input-ic');
   elements.presetSelect = $('preset-select');
   elements.presetDescription = $('preset-description');
+  elements.domainType = $('domain-type');
+  elements.domainA = $('domain-a');
+  elements.domainB = $('domain-b');
+  elements.domainALabel = $('domain-a-label');
+  elements.domainBLabel = $('domain-b-label');
+  elements.bcLabel = $('bc-label');
+  elements.inputBC = $('input-bc');
   elements.xMin = $('x-min');
   elements.xMax = $('x-max');
   elements.tMin = $('t-min');
@@ -90,6 +97,21 @@ export function initUI(onRecompute) {
     onRecompute();
   });
 
+  // Domain type
+  elements.domainType.addEventListener('change', () => {
+    const dt = elements.domainType.value;
+    elements.domainALabel.style.display = (dt === 'a-inf' || dt === 'a-b') ? '' : 'none';
+    elements.domainBLabel.style.display = (dt === 'inf-b' || dt === 'a-b') ? '' : 'none';
+    elements.bcLabel.style.display = dt !== 'R' ? '' : 'none';
+    onRecompute();
+  });
+  elements.domainA.addEventListener('change', onRecompute);
+  elements.domainB.addEventListener('change', onRecompute);
+  elements.inputBC.addEventListener('input', () => {
+    elements.presetSelect.value = '-1';
+    debouncedRecompute();
+  });
+
   // Zoom/recenter buttons are wired by main.js via getZoomControls()
 
   // Preset dropdown
@@ -131,6 +153,10 @@ export function getState() {
     showParticles: elements.showParticles.checked,
     particlesPerCurve: parseInt(elements.particleCount.value),
     resolveShocks: elements.resolveShocks.checked,
+    domainType: elements.domainType.value,
+    domainA: parseFloat(elements.domainA.value),
+    domainB: parseFloat(elements.domainB.value),
+    boundaryCondition: elements.inputBC.value,
   };
 }
 

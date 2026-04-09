@@ -36,6 +36,29 @@
         <span class="label-text">u(x, 0) =</span>
         <input type="text" id="input-ic" value="sin(x)" spellcheck="false" placeholder="empty = portrait only" />
       </label>
+      <div class="domain-row">
+        <label>
+          <span class="label-text">Domain</span>
+          <select id="domain-type">
+            <option value="R" selected>x ∈ ℝ</option>
+            <option value="a-inf">x ∈ [a, ∞)</option>
+            <option value="inf-b">x ∈ (-∞, b]</option>
+            <option value="a-b">x ∈ [a, b]</option>
+          </select>
+        </label>
+        <label id="domain-a-label" style="display:none">
+          <span class="label-text">a =</span>
+          <input type="number" id="domain-a" value="0" step="0.5" />
+        </label>
+        <label id="domain-b-label" style="display:none">
+          <span class="label-text">b =</span>
+          <input type="number" id="domain-b" value="1" step="0.5" />
+        </label>
+      </div>
+      <label id="bc-label" style="display:none">
+        <span class="label-text">u(a, t) = or u(b, t) =</span>
+        <input type="text" id="input-bc" value="0" spellcheck="false" placeholder="boundary condition" />
+      </label>
     </div>
 
     <!-- Presets -->
