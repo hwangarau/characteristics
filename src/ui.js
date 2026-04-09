@@ -22,6 +22,7 @@ export function initUI(onRecompute) {
   elements.numCurvesVal = $('num-curves-val');
   elements.colorMode = $('color-mode');
   elements.showParticles = $('show-particles');
+  elements.resolveShocks = $('resolve-shocks');
   elements.statusText = $('status-text');
 
   // Populate preset dropdown
@@ -68,8 +69,9 @@ export function initUI(onRecompute) {
   // Color mode
   elements.colorMode.addEventListener('change', onRecompute);
 
-  // Particles checkbox
+  // Checkboxes
   elements.showParticles.addEventListener('change', onRecompute);
+  elements.resolveShocks.addEventListener('change', onRecompute);
 
   // Preset dropdown
   elements.presetSelect.addEventListener('change', () => {
@@ -108,6 +110,7 @@ export function getState() {
     numCurves: parseInt(elements.numCurves.value),
     colorMode: elements.colorMode.value,
     showParticles: elements.showParticles.checked,
+    resolveShocks: elements.resolveShocks.checked,
   };
 }
 

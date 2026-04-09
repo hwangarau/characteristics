@@ -165,20 +165,71 @@ export function traceCharacteristics(opts) {
     traceSingle(aFn, bFn, seed.x0, seed.t0, seed.u0, dt, tRange[1], xBound)
   );
 
-  // Shock detection: find where adjacent characteristics cross
+  // Shock detection: find ALL crossings between adjacent characteristics
   const shocks = detectShocks(characteristics);
 
   return { characteristics, shocks, warning };
 }
 
 /**
- * Detect crossings between adjacent characteristics (sorted by x0).
- * Returns the earliest crossing point for each adjacent pair.
+ * Produce a "resolved" copy of characteristics: each curve is truncated
+ * at the earliest shock time that affects it. Returns the truncated curves
+ * plus the shock curve (points connected in order of increasing t).
+ *
+ * @param {Characteristic[]} chars - original characteristics
+ * @param {Array<{x: number, t: number, i: number, j: number}>} shocks - crossing points
+ * @returns {{ resolved: Characteristic[], shockCurve: Array<{x: number, t: number}> }}
+ */
+export function resolveShocks(chars, shocks) {
+  if (!shocks.length) return { resolved: chars, shockCurve: [] };
+
+  // For each characteristic, find the earliest shock time that involves it
+  const sorted = [...chars].sort((a, b) => a.x0 - b.x0);
+  const truncateTime = new Map(); // charIndex → earliest shock t
+
+  for (const s of shocks) {
+    // s.i and s.j are indices into the sorted array
+    const ci = sorted[s.i];
+    const cj = sorted[s.j];
+
+    for (const c of [ci, cj]) {
+      const key = c;
+      const existing = truncateTime.get(key);
+      if (existing === undefined || s.t < existing) {
+        truncateTime.set(key, s.t);
+      }
+    }
+  }
+
+  // Truncate each characteristic at its shock time
+  const resolved = sorted.map(char => {
+    const cutoff = truncateTime.get(char);
+    if (cutoff === undefined) return char;
+
+    const truncated = [];
+    for (const p of char.points) {
+      if (p.t > cutoff) break;
+      truncated.push(p);
+    }
+
+    return { ...char, points: truncated };
+  });
+
+  // Build shock curve: sort shock points by t, then connect
+  const shockCurve = [...shocks]
+    .sort((a, b) => a.t - b.t)
+    .map(s => ({ x: s.x, t: s.t }));
+
+  return { resolved, shockCurve };
+}
+
+/**
+ * Detect ALL crossings between adjacent characteristics (sorted by x0).
+ * Returns crossing points with indices of the involved curves.
  */
 function detectShocks(chars) {
   if (chars.length < 2) return [];
 
-  // Sort by initial x
   const sorted = [...chars].sort((a, b) => a.x0 - b.x0);
   const shocks = [];
 
@@ -191,14 +242,12 @@ function detectShocks(chars) {
       const diff_k = c1[k].x - c2[k].x;
       const diff_k1 = c1[k + 1].x - c2[k + 1].x;
 
-      // Sign change indicates crossing
       if (diff_k * diff_k1 < 0) {
-        // Linear interpolation to find crossing time
         const alpha = diff_k / (diff_k - diff_k1);
         const tCross = c1[k].t + alpha * (c1[k + 1].t - c1[k].t);
         const xCross = c1[k].x + alpha * (c1[k + 1].x - c1[k].x);
-        shocks.push({ x: xCross, t: tCross });
-        break; // Only first crossing per pair
+        shocks.push({ x: xCross, t: tCross, i, j: i + 1 });
+        // Don't break — find ALL crossings for this pair
       }
     }
   }

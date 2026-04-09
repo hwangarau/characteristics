@@ -8,7 +8,7 @@
 import { Renderer } from './renderer.js';
 import { compileExpression, compileInitialData } from './math-pipeline.js';
 import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
-import { traceCharacteristics } from './integrator.js';
+import { traceCharacteristics, resolveShocks } from './integrator.js';
 import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
 import { initUI, getState, setStatus, loadPreset, updateViewport } from './ui.js';
 import { PRESETS } from './presets.js';
@@ -67,30 +67,49 @@ function recompute() {
   currentAFn = aResult.evaluate;
   currentColorMode = state.colorMode;
 
-  // 5. Render curves immediately
+  // 5. Render
   renderer.setViewport(state.xRange[0], state.xRange[1], state.tRange[0], state.tRange[1]);
   renderer.clear();
   renderer.drawGrid();
   renderer.drawAxes();
-  renderer.drawCharacteristics(currentCharacteristics, state.colorMode, aResult.evaluate);
+
+  // Resolve shocks if toggled — truncate characteristics at shock curve
+  let displayChars = currentCharacteristics;
+  let shockCurve = [];
+
+  if (state.resolveShocks && result.shocks.length > 0) {
+    const resolved = resolveShocks(currentCharacteristics, result.shocks);
+    displayChars = resolved.resolved;
+    shockCurve = resolved.shockCurve;
+  }
+
+  // In particle mode, don't draw solid curves (particles ARE the visualization)
+  if (!state.showParticles) {
+    renderer.drawCharacteristics(displayChars, state.colorMode, aResult.evaluate);
+  } else {
+    // Draw curves very faintly as guides
+    renderer.drawCharacteristics(displayChars, 'uniform-dim', aResult.evaluate);
+  }
+
   renderer.drawInitialData(icResult.evaluate, state.xRange);
 
+  // Draw all shock points + shock curve
   if (result.shocks.length > 0) {
-    renderer.drawShocks(result.shocks);
+    renderer.drawShocks(result.shocks, shockCurve);
   }
 
   // Status
-  let statusParts = [`${currentCharacteristics.length} characteristics`];
+  let statusParts = [`${displayChars.length} characteristics`];
   if (result.shocks.length > 0) {
     const earliest = result.shocks.reduce((a, b) => a.t < b.t ? a : b);
-    statusParts.push(`shock at t \u2248 ${earliest.t.toFixed(2)}`);
+    statusParts.push(`${result.shocks.length} crossings | shock at t \u2248 ${earliest.t.toFixed(2)}`);
   }
   if (result.warning) statusParts.push(result.warning);
   setStatus(statusParts.join(' | '));
 
   // 6. Particles
   if (state.showParticles) {
-    renderer.initParticles(currentCharacteristics, 5);
+    renderer.initParticles(displayChars, 5);
     renderer.cacheBackground();
     startAnimation();
   } else {

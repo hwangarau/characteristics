@@ -216,11 +216,13 @@ export class Renderer {
       const pts = char.points;
       if (pts.length < 2) continue;
 
-      if (colorMode === 'uniform' || colorMode === 'index') {
+      if (colorMode === 'uniform' || colorMode === 'index' || colorMode === 'uniform-dim') {
         // Single color per curve — fast path
-        ctx.strokeStyle = colorMode === 'uniform'
-          ? colormap.uniform()
-          : colormap.categorical(ci);
+        ctx.strokeStyle = colorMode === 'uniform-dim'
+          ? 'rgba(91, 155, 213, 0.15)'
+          : colorMode === 'uniform'
+            ? colormap.uniform()
+            : colormap.categorical(ci);
 
         ctx.beginPath();
         const [sx, sy] = this.worldToCanvas(pts[0].x, pts[0].t);
@@ -257,9 +259,9 @@ export class Renderer {
   }
 
   /**
-   * Draw shock annotations.
+   * Draw shock annotations: all crossing points + optional shock curve.
    */
-  drawShocks(shocks) {
+  drawShocks(shocks, shockCurve = []) {
     if (!shocks.length) return;
 
     const ctx = this.ctx;
@@ -270,24 +272,31 @@ export class Renderer {
 
     const earliest = shocks.reduce((a, b) => a.t < b.t ? a : b);
 
+    // Draw all crossing points
     for (const s of shocks) {
       const [cx, cy] = this.worldToCanvas(s.x, s.t);
-      ctx.fillStyle = 'rgba(203, 67, 53, 0.6)';
+      ctx.fillStyle = 'rgba(203, 67, 53, 0.4)';
       ctx.beginPath();
-      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 2, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    const [sx, sy] = this.worldToCanvas(earliest.x, earliest.t);
-    ctx.strokeStyle = 'rgba(203, 67, 53, 0.5)';
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(sx, this.margin.top);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    // Draw shock curve if resolved
+    if (shockCurve.length >= 2) {
+      ctx.strokeStyle = 'rgba(203, 67, 53, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      const [sx0, sy0] = this.worldToCanvas(shockCurve[0].x, shockCurve[0].t);
+      ctx.moveTo(sx0, sy0);
+      for (let i = 1; i < shockCurve.length; i++) {
+        const [sx, sy] = this.worldToCanvas(shockCurve[i].x, shockCurve[i].t);
+        ctx.lineTo(sx, sy);
+      }
+      ctx.stroke();
+    }
 
+    // Label earliest shock
+    const [sx, sy] = this.worldToCanvas(earliest.x, earliest.t);
     ctx.fillStyle = 'rgba(203, 67, 53, 0.8)';
     ctx.font = '11px Consolas, monospace';
     ctx.textAlign = 'left';
