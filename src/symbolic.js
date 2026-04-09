@@ -10,16 +10,22 @@
  * Returns "Numerical solution only" for anything it can't handle.
  */
 
-import nerdamer from 'nerdamer';
-import 'nerdamer/Solve';
-import 'nerdamer/Calculus';
+// Lazy-load nerdamer so a failure doesn't crash the whole app
+let nerdamer = null;
+let nerdamerReady = false;
 
-// Note: Extra must be imported AFTER Solve and Calculus for laplace/ilt to work
-let extraLoaded = false;
-async function ensureExtra() {
-  if (!extraLoaded) {
+async function ensureNerdamer() {
+  if (nerdamerReady) return;
+  try {
+    const mod = await import('nerdamer');
+    nerdamer = mod.default || mod;
+    await import('nerdamer/Solve');
+    await import('nerdamer/Calculus');
     await import('nerdamer/Extra');
-    extraLoaded = true;
+    nerdamerReady = true;
+  } catch (e) {
+    console.warn('Nerdamer failed to load:', e);
+    nerdamerReady = false;
   }
 }
 
@@ -129,7 +135,8 @@ function solveLinearODE(rhs, yVar, y0) {
  * @returns {Promise<{ xSolution: { latex: string, raw: string } | null, uSolution: { latex: string, raw: string } | null }>}
  */
 export async function solveCharacteristics(aExpr, bExpr) {
-  await ensureExtra();
+  await ensureNerdamer();
+  if (!nerdamerReady) return result;
 
   const aStr = (aExpr || '0').trim();
   const bStr = (bExpr || '0').trim();
