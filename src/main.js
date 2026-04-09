@@ -14,6 +14,7 @@ import { traceCharacteristics, resolveShocks } from './integrator.js';
 import { computeShockCurve } from './shock-curve.js';
 import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
 import { initUI, getState, setStatus, loadPreset, updateViewport, setZoomLevel, getZoomControls, getCurrentPreset } from './ui.js';
+import { computeViewport } from './viewport.js';
 import { PRESETS } from './presets.js';
 
 let renderer;
@@ -28,6 +29,7 @@ let currentICFn = null;
 let currentState = null;
 let defaultViewport = null; // for recenter
 let zoomScale = 1.0;
+let panMode = false; // when true, click+drag pans (no ctrl needed)
 let animating = false;
 let animFrameId = null;
 
@@ -250,7 +252,7 @@ function setupPanZoom(canvas) {
 
   // Pan: instant rerender
   canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey))) {
+    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey || panMode))) {
       isPanning = true;
       lastMouse = { x: e.clientX, y: e.clientY };
       canvas.style.cursor = 'grabbing';
@@ -313,7 +315,7 @@ function setupClickInspect(canvas) {
   closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
 
   canvas.addEventListener('click', (e) => {
-    if (e.ctrlKey || e.metaKey) return;
+    if (e.ctrlKey || e.metaKey || panMode) return;
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
@@ -478,7 +480,8 @@ function setupHover(canvas) {
 // ─── Zoom buttons ───
 
 function setupZoomButtons() {
-  const { zoomIn, zoomOut, recenter } = getZoomControls();
+  const { zoomIn, zoomOut, recenter, fit, panMode: panModeBtn } = getZoomControls();
+  const canvas = document.getElementById('main-canvas');
 
   function zoom(factor) {
     const cx = (renderer.xMin + renderer.xMax) / 2;
@@ -495,9 +498,10 @@ function setupZoomButtons() {
     currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
     updateViewport(newXMin, newXMax, newTMin, newTMax);
     setZoomLevel(zoomScale);
-    rerender();
 
-    // Debounced retrace
+    renderer.setViewport(newXMin, newXMax, newTMin, newTMax);
+    renderer.blitSnapshot();
+
     clearTimeout(zoom._timer);
     zoom._timer = setTimeout(recompute, 300);
   }
@@ -505,6 +509,7 @@ function setupZoomButtons() {
   zoomIn?.addEventListener('click', () => zoom(1 / 1.3));
   zoomOut?.addEventListener('click', () => zoom(1.3));
 
+  // Recenter: reset to preset's original viewport
   recenter?.addEventListener('click', () => {
     const preset = getCurrentPreset();
     if (preset) {
@@ -520,6 +525,28 @@ function setupZoomButtons() {
       setZoomLevel(1.0);
       recompute();
     }
+  });
+
+  // Fit: auto-compute viewport from current equation
+  fit?.addEventListener('click', () => {
+    const state = getState();
+    const aResult = compileExpression(state.a);
+    const icResult = compileInitialData(state.initialData);
+    if (aResult.error || !icResult.evaluate) return;
+
+    const vp = computeViewport(aResult.evaluate, icResult.evaluate, aResult.dependsOnU);
+    zoomScale = 1.0;
+    currentState = { ...currentState, xRange: vp.xRange, tRange: vp.tRange };
+    updateViewport(vp.xRange[0], vp.xRange[1], vp.tRange[0], vp.tRange[1]);
+    setZoomLevel(1.0);
+    recompute();
+  });
+
+  // Pan mode toggle
+  panModeBtn?.addEventListener('click', () => {
+    panMode = !panMode;
+    panModeBtn.classList.toggle('active', panMode);
+    canvas.style.cursor = panMode ? 'grab' : '';
   });
 }
 

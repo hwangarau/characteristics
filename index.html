@@ -114,12 +114,15 @@
     </details>
   </div>
 
-  <!-- Zoom controls (top-right, map-style) -->
+  <!-- Zoom/pan controls (top-right) -->
   <div id="zoom-controls">
+    <button id="pan-mode-btn" title="Pan mode (drag to move)" class="tool-btn">&#9995;</button>
+    <span class="tool-sep"></span>
     <button id="zoom-in-btn" title="Zoom in">+</button>
     <span id="zoom-level">1.0x</span>
     <button id="zoom-out-btn" title="Zoom out">&minus;</button>
-    <button id="recenter-btn" title="Reset view">&#8634;</button>
+    <button id="fit-btn" title="Fit view to equation">Fit</button>
+    <button id="recenter-btn" title="Reset to preset view">&#8634;</button>
   </div>
 
   <!-- Inspect panel — appears on click -->

@@ -33,6 +33,8 @@ export function initUI(onRecompute) {
   elements.zoomInBtn = $('zoom-in-btn');
   elements.zoomOutBtn = $('zoom-out-btn');
   elements.recenterBtn = $('recenter-btn');
+  elements.fitBtn = $('fit-btn');
+  elements.panModeBtn = $('pan-mode-btn');
   elements.zoomLevel = $('zoom-level');
   elements.statusText = $('status-text');
 
@@ -196,6 +198,8 @@ export function getZoomControls() {
     zoomIn: elements.zoomInBtn,
     zoomOut: elements.zoomOutBtn,
     recenter: elements.recenterBtn,
+    fit: elements.fitBtn,
+    panMode: elements.panModeBtn,
   };
 }
 
