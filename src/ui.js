@@ -73,9 +73,22 @@ export function initUI(onRecompute) {
   // Color mode
   elements.colorMode.addEventListener('change', onRecompute);
 
+  elements.particleCount = $('particle-count');
+  elements.particleCountVal = $('particle-count-val');
+  elements.particleCountLabel = $('particle-count-label');
+
   // Checkboxes
-  elements.showParticles.addEventListener('change', onRecompute);
+  elements.showParticles.addEventListener('change', () => {
+    elements.particleCountLabel.style.display = elements.showParticles.checked ? '' : 'none';
+    onRecompute();
+  });
   elements.resolveShocks.addEventListener('change', onRecompute);
+
+  // Particle count slider
+  elements.particleCount.addEventListener('input', () => {
+    elements.particleCountVal.textContent = elements.particleCount.value;
+    onRecompute();
+  });
 
   // Zoom/recenter buttons are wired by main.js via getZoomControls()
 
@@ -116,6 +129,7 @@ export function getState() {
     numCurves: parseInt(elements.numCurves.value),
     colorMode: elements.colorMode.value,
     showParticles: elements.showParticles.checked,
+    particlesPerCurve: parseInt(elements.particleCount.value),
     resolveShocks: elements.resolveShocks.checked,
   };
 }

@@ -89,7 +89,7 @@ function recompute() {
     const displayChars = getDisplayChars();
     particleGL.resize(window.innerWidth, window.innerHeight);
     particleGL.setViewport(state.xRange[0], state.xRange[1], state.tRange[0], state.tRange[1]);
-    particleGL.initParticles(displayChars, 5);
+    particleGL.initParticles(displayChars, state.particlesPerCurve || 5);
     startAnimation();
   } else {
     stopAnimation();
@@ -271,11 +271,130 @@ function setupPanZoom(canvas) {
 
 // ─── Hover ───
 
+function setupClickInspect(canvas) {
+  const panel = document.getElementById('inspect-panel');
+  const title = document.getElementById('inspect-title');
+  const eqns = document.getElementById('inspect-equations');
+  const inspectCanvas = document.getElementById('inspect-canvas');
+  const closeBtn = document.getElementById('inspect-close');
+
+  closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+
+  canvas.addEventListener('click', (e) => {
+    if (e.ctrlKey || e.metaKey) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+
+    // Find nearest characteristic
+    let bestChar = null;
+    let bestDist = Infinity;
+
+    for (const char of currentCharacteristics) {
+      for (let i = 0; i < char.points.length; i += 3) {
+        const p = char.points[i];
+        const [pcx, pcy] = renderer.worldToCanvas(p.x, p.t);
+        const dist = Math.hypot(pcx - cx, pcy - cy);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestChar = char;
+        }
+      }
+    }
+
+    if (!bestChar || bestDist > 20) {
+      panel.classList.add('hidden');
+      return;
+    }
+
+    // Show panel
+    panel.classList.remove('hidden');
+    title.textContent = `Characteristic from x\u2080 = ${bestChar.x0.toFixed(2)}`;
+
+    // Show initial values
+    const u0 = bestChar.u0;
+    eqns.innerHTML = '';
+    const info = document.createElement('div');
+    info.style.cssText = 'font:12px Consolas,monospace; color:var(--text-dim); line-height:1.6';
+    info.innerHTML = `x\u2080 = ${bestChar.x0.toFixed(3)}<br>u\u2080 = ${isFinite(u0) ? u0.toFixed(3) : 'N/A'}<br>points: ${bestChar.points.length}`;
+    eqns.appendChild(info);
+
+    // Draw u(t) curve on the inspect canvas
+    drawInspectCurve(inspectCanvas, bestChar);
+  });
+}
+
+function drawInspectCurve(canvas, char) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = 280 * dpr;
+  canvas.height = 120 * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const w = 280, h = 120;
+  const m = { top: 15, right: 10, bottom: 20, left: 35 };
+  const pw = w - m.left - m.right;
+  const ph = h - m.top - m.bottom;
+
+  // Background
+  ctx.fillStyle = 'rgba(13, 17, 23, 0.8)';
+  ctx.fillRect(0, 0, w, h);
+
+  const pts = char.points;
+  if (pts.length < 2) return;
+
+  // Find u range
+  let uMin = Infinity, uMax = -Infinity;
+  for (const p of pts) {
+    if (isFinite(p.u)) {
+      uMin = Math.min(uMin, p.u);
+      uMax = Math.max(uMax, p.u);
+    }
+  }
+  if (!isFinite(uMin)) return;
+  if (uMax - uMin < 0.01) { uMin -= 0.5; uMax += 0.5; }
+
+  const tMin = pts[0].t;
+  const tMax = pts[pts.length - 1].t;
+
+  // Axes
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(m.left, m.top + ph);
+  ctx.lineTo(m.left + pw, m.top + ph);
+  ctx.moveTo(m.left, m.top);
+  ctx.lineTo(m.left, m.top + ph);
+  ctx.stroke();
+
+  // Labels
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '9px Consolas';
+  ctx.textAlign = 'center';
+  ctx.fillText('t', m.left + pw / 2, h - 3);
+  ctx.textAlign = 'right';
+  ctx.fillText('u', m.left - 4, m.top + ph / 2 + 3);
+  ctx.fillText(uMax.toFixed(1), m.left - 4, m.top + 8);
+  ctx.fillText(uMin.toFixed(1), m.left - 4, m.top + ph + 3);
+
+  // Draw u(t) curve
+  ctx.strokeStyle = '#5b9bd5';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const px = m.left + (pts[i].t - tMin) / (tMax - tMin) * pw;
+    const py = m.top + ph - (pts[i].u - uMin) / (uMax - uMin) * ph;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
 function setupHover(canvas) {
   const hoverInfo = document.getElementById('hover-info');
 
   canvas.addEventListener('mousemove', (e) => {
-    if (e.ctrlKey || e.metaKey) return; // don't hover while panning
+    if (e.ctrlKey || e.metaKey) return;
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
@@ -372,6 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initUI(recompute);
   setupHover(canvas);
+  setupClickInspect(canvas);
   setupPanZoom(canvas);
   setupZoomButtons();
 
