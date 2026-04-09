@@ -5,8 +5,9 @@
 
 import { Renderer } from './renderer.js';
 import { compileExpression, compileInitialData } from './math-pipeline.js';
-import { renderEquation, renderInitialCondition } from './equation-display.js';
+import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
 import { traceCharacteristics } from './integrator.js';
+import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
 import { initUI, getState, setStatus, loadPreset } from './ui.js';
 import { PRESETS } from './presets.js';
 
@@ -16,7 +17,7 @@ let animating = false;
 let animFrameId = null;
 
 // DOM elements for equation display
-let pdeDisplay, charOdeDisplay, icDisplay;
+let pdeDisplay, charOdeDisplay, icDisplay, xSolDisplay, uSolDisplay;
 
 function recompute() {
   const state = getState();
@@ -39,6 +40,16 @@ function recompute() {
   // 2. Update KaTeX displays
   renderEquation(pdeDisplay, charOdeDisplay, aResult.latex, bResult.latex);
   renderInitialCondition(icDisplay, icResult.latex);
+
+  // 2b. Symbolic ODE solutions (async, non-blocking)
+  solveCharacteristics(state.a, state.b).then(solutions => {
+    const [xTex, uTex] = formatSolutionDisplay(solutions);
+    renderSolution(xSolDisplay, xTex);
+    renderSolution(uSolDisplay, uTex);
+  }).catch(() => {
+    xSolDisplay.textContent = '';
+    uSolDisplay.textContent = '';
+  });
 
   // 3. Bail if parse errors
   if (aResult.error || bResult.error) {
@@ -177,6 +188,8 @@ document.addEventListener('DOMContentLoaded', () => {
   pdeDisplay = document.getElementById('pde-display');
   charOdeDisplay = document.getElementById('char-ode-display');
   icDisplay = document.getElementById('ic-display');
+  xSolDisplay = document.getElementById('x-solution-display');
+  uSolDisplay = document.getElementById('u-solution-display');
 
   initUI(recompute);
   setupHover(canvas);

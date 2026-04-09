@@ -68,3 +68,14 @@ export function renderInitialCondition(container, fLatex) {
   }
   render(container, `u(x, 0) = ${fLatex}`);
 }
+
+/**
+ * Render a symbolic ODE solution line.
+ */
+export function renderSolution(container, latex) {
+  if (!latex) {
+    container.textContent = '';
+    return;
+  }
+  render(container, latex);
+}

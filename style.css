@@ -69,6 +69,13 @@ html, body {
 #equation-section .katex-display { margin: 0; }
 #equation-section .katex { font-size: 1.05em; color: var(--text); }
 
+.solution-line {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+.solution-line .katex { font-size: 0.95em; }
+
 /* Sections */
 .section {
   display: flex;

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "katex": "^0.16.45",
-    "mathjs": "^15.2.0"
+    "mathjs": "^15.2.0",
+    "nerdamer": "^1.1.13"
   }
 }
