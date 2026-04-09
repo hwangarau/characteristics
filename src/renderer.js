@@ -334,6 +334,45 @@ export class Renderer {
   }
 
   /**
+   * Draw the analytically/numerically computed shock curve (R-H).
+   * This is independent of the drawn characteristics — always accurate.
+   */
+  drawShockCurve(curve) {
+    if (curve.length < 2) return;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.margin.left, this.margin.top, this.plotWidth, this.plotHeight);
+    ctx.clip();
+
+    // Bold shock line
+    ctx.strokeStyle = 'rgba(220, 80, 60, 0.9)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    const [x0, y0] = this.worldToCanvas(curve[0].x, curve[0].t);
+    ctx.moveTo(x0, y0);
+    for (let i = 1; i < curve.length; i++) {
+      const [x, y] = this.worldToCanvas(curve[i].x, curve[i].t);
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Start marker
+    ctx.fillStyle = 'rgba(220, 80, 60, 0.9)';
+    ctx.beginPath();
+    ctx.arc(x0, y0, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Label
+    ctx.font = '11px Consolas, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`t* \u2248 ${curve[0].t.toFixed(2)}`, x0 + 8, y0 - 6);
+
+    ctx.restore();
+  }
+
+  /**
    * Draw the initial data curve u(x,0) = f(x) along the bottom axis.
    */
   drawInitialData(f, xRange) {

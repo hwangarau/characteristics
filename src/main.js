@@ -11,6 +11,7 @@ import { ParticleGL } from './particles-gl.js';
 import { compileExpression, compileInitialData } from './math-pipeline.js';
 import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
 import { traceCharacteristics, resolveShocks } from './integrator.js';
+import { computeShockCurve } from './shock-curve.js';
 import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
 import { initUI, getState, setStatus, loadPreset, updateViewport, setZoomLevel, getZoomControls, getCurrentPreset } from './ui.js';
 import { PRESETS } from './presets.js';
@@ -19,6 +20,7 @@ let renderer;
 let particleGL;
 let currentCharacteristics = [];
 let currentShocks = [];
+let currentShockCurve = [];
 let currentAFn = null;
 let currentICFn = null;
 let currentState = null;
@@ -77,6 +79,15 @@ function recompute() {
   currentShocks = result.shocks;
   currentAFn = aResult.evaluate;
   currentICFn = icResult.evaluate;
+
+  // 3b. Compute shock curve analytically (independent of drawn characteristics)
+  const aDependsX = exprContainsVar(state.a, 'x');
+  const aDependsT = exprContainsVar(state.a, 't');
+  const shockResult = computeShockCurve(
+    aResult.evaluate, icResult.evaluate,
+    aDependsX, aDependsT, state.xRange, state.tRange
+  );
+  currentShockCurve = shockResult.shockCurve;
 
   // 4. Render
   rerender();
@@ -139,6 +150,9 @@ function rerender() {
 
   if (currentShocks.length > 0) {
     renderer.drawShocks(currentShocks);
+  }
+  if (currentShockCurve.length > 0) {
+    renderer.drawShockCurve(currentShockCurve);
   }
 
   // Status
@@ -265,6 +279,13 @@ function setupPanZoom(canvas) {
       scheduleRecompute();
     }
   });
+}
+
+// ─── Utility ───
+
+function exprContainsVar(expr, v) {
+  const masked = (expr || '').replace(/\bexp\b/g, '_').replace(/\bstep\b/g, '_');
+  return new RegExp(`(?<![a-zA-Z_])${v}(?![a-zA-Z0-9_])`).test(masked);
 }
 
 // ─── Hover ───
