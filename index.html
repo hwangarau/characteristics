@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Method of Characteristics</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <canvas id="main-canvas"></canvas>
+  <div id="hover-info"></div>
+
+  <!-- Floating control panel (anvaka-style overlay) -->
+  <div id="controls">
+    <!-- Live equation display -->
+    <div id="equation-section">
+      <div id="pde-display"></div>
+      <div id="char-ode-display"></div>
+      <div id="ic-display"></div>
+    </div>
+
+    <!-- Equation input -->
+    <div class="section">
+      <label>
+        <span class="label-text">a(u, x, t) =</span>
+        <input type="text" id="input-a" value="2" spellcheck="false" />
+      </label>
+      <label>
+        <span class="label-text">b(u, x, t) =</span>
+        <input type="text" id="input-b" value="0" spellcheck="false" />
+      </label>
+      <label>
+        <span class="label-text">u(x, 0) =</span>
+        <input type="text" id="input-ic" value="sin(x)" spellcheck="false" placeholder="empty = portrait only" />
+      </label>
+    </div>
+
+    <!-- Presets -->
+    <div class="section">
+      <select id="preset-select"></select>
+      <p id="preset-description" class="hint"></p>
+    </div>
+
+    <!-- Settings (collapsible) -->
+    <details class="section">
+      <summary>Settings</summary>
+      <div class="settings-body">
+        <div class="range-row">
+          <label>
+            <span class="label-text">x min</span>
+            <input type="number" id="x-min" value="-6" step="1" />
+          </label>
+          <label>
+            <span class="label-text">x max</span>
+            <input type="number" id="x-max" value="6" step="1" />
+          </label>
+        </div>
+        <label>
+          <span class="label-text">t max</span>
+          <input type="number" id="t-max" value="4" step="0.5" />
+        </label>
+        <label>
+          <span class="label-text">Curves: <span id="num-curves-val">40</span></span>
+          <input type="range" id="num-curves" min="5" max="100" value="40" />
+        </label>
+        <label>
+          <span class="label-text">Color</span>
+          <select id="color-mode">
+            <option value="uniform" selected>uniform</option>
+            <option value="u-value">u value</option>
+            <option value="speed">speed |a|</option>
+            <option value="index">curve index</option>
+          </select>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="show-particles" />
+          <span>Animate particles</span>
+        </label>
+      </div>
+    </details>
+  </div>
+
+  <div id="status-bar">
+    <span id="status-text"></span>
+  </div>
+
+  <!-- Hidden: t always starts at 0 -->
+  <input type="hidden" id="t-min" value="0" />
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

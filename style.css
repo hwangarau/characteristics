@@ -1,0 +1,210 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d1117;
+  --surface: rgba(13, 17, 23, 0.92);
+  --border: rgba(91, 155, 213, 0.15);
+  --text: #c9d1d9;
+  --text-dim: #6e7681;
+  --accent: #5b9bd5;
+  --error: #f85149;
+  --input-bg: rgba(22, 27, 34, 0.9);
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+}
+
+/* Full-screen canvas */
+#main-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Floating control panel — anvaka style */
+#controls {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  width: 300px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 10;
+}
+
+/* Scrollbar */
+#controls::-webkit-scrollbar { width: 4px; }
+#controls::-webkit-scrollbar-track { background: transparent; }
+#controls::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Equation display */
+#equation-section {
+  background: rgba(91, 155, 213, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#equation-section .katex-display { margin: 0; }
+#equation-section .katex { font-size: 1.05em; color: var(--text); }
+
+/* Sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Inputs */
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.label-text {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', Consolas, 'Fira Code', monospace;
+}
+
+input[type="text"],
+input[type="number"] {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 7px;
+  font-family: 'SF Mono', Consolas, 'Fira Code', monospace;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+  border-color: var(--accent);
+}
+
+input.error {
+  border-color: var(--error);
+}
+
+input::placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 11px;
+}
+
+select {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 7px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"] {
+  accent-color: var(--accent);
+  width: 100%;
+}
+
+.range-row {
+  display: flex;
+  gap: 8px;
+}
+.range-row label { flex: 1; }
+.range-row input[type="number"] { width: 100%; }
+
+.checkbox-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+  cursor: pointer;
+}
+.checkbox-label input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+/* Collapsible settings */
+details summary {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+details summary:hover { color: var(--text); }
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+/* Hover info */
+#hover-info {
+  position: fixed;
+  bottom: 32px;
+  left: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', Consolas, monospace;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Status bar */
+#status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', Consolas, monospace;
+  background: rgba(13, 17, 23, 0.8);
+  z-index: 5;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  #controls {
+    width: calc(100% - 24px);
+    max-height: 50vh;
+  }
+}
