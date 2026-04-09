@@ -29,7 +29,6 @@ let currentICFn = null;
 let currentState = null;
 let defaultViewport = null; // for recenter
 let zoomScale = 1.0;
-let panMode = false; // when true, click+drag pans (no ctrl needed)
 let animating = false;
 let animFrameId = null;
 
@@ -204,68 +203,24 @@ function stopAnimation() {
 }
 
 // ─── Pan & Zoom ───
+// Click+drag = pan. Click (no drag) = inspect.
+// Scroll = zoom. Touch: two-finger pinch = zoom, two-finger drag = pan.
 
-function setupPanZoom(canvas) {
-  let isPanning = false;
+function setupInteraction(canvas) {
+  let isDown = false;
+  let startMouse = null;
   let lastMouse = null;
+  let totalDrag = 0; // total pixels dragged — used to distinguish click from drag
   let recomputeTimer = null;
 
-  // Debounced recompute — retrace after viewport settles
+  const DRAG_THRESHOLD = 5; // pixels — below this is a click, above is a drag
+
   function scheduleRecompute() {
     clearTimeout(recomputeTimer);
     recomputeTimer = setTimeout(recompute, 300);
   }
 
-  // Zoom: instant rerender, debounced retrace
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const [worldX, worldT] = renderer.canvasToWorld(cx, cy);
-
-    const zoomFactor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-
-    const newXMin = worldX - (worldX - renderer.xMin) * zoomFactor;
-    const newXMax = worldX + (renderer.xMax - worldX) * zoomFactor;
-    const newTMin = Math.max(0, worldT - (worldT - renderer.tMin) * zoomFactor);
-    const newTMax = worldT + (renderer.tMax - worldT) * zoomFactor;
-
-    // Update state immediately
-    zoomScale /= zoomFactor;
-    currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
-    updateViewport(newXMin, newXMax, newTMin, newTMax);
-    setZoomLevel(zoomScale);
-
-    // Instant blit — shift/scale the cached snapshot (one drawImage call)
-    renderer.setViewport(newXMin, newXMax, newTMin, newTMax);
-    renderer.blitSnapshot();
-
-    // Update particle viewport if animating
-    if (animating) {
-      particleGL.setViewport(newXMin, newXMax, newTMin, newTMax);
-    }
-
-    // Retrace after zoom settles
-    scheduleRecompute();
-  }, { passive: false });
-
-  // Pan: instant rerender
-  canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 1 || (e.button === 0 && (e.ctrlKey || e.metaKey || panMode))) {
-      isPanning = true;
-      lastMouse = { x: e.clientX, y: e.clientY };
-      canvas.style.cursor = 'grabbing';
-      e.preventDefault();
-    }
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (!isPanning) return;
-    const dx = e.clientX - lastMouse.x;
-    const dy = e.clientY - lastMouse.y;
-    lastMouse = { x: e.clientX, y: e.clientY };
-
+  function applyPan(dx, dy) {
     const worldDx = -dx / renderer.plotWidth * (renderer.xMax - renderer.xMin);
     const worldDt = dy / renderer.plotHeight * (renderer.tMax - renderer.tMin);
 
@@ -276,20 +231,125 @@ function setupPanZoom(canvas) {
 
     currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
     updateViewport(newXMin, newXMax, newTMin, newTMax);
-
-    // Instant blit — shift the cached snapshot
     renderer.setViewport(newXMin, newXMax, newTMin, newTMax);
     renderer.blitSnapshot();
 
     if (animating) {
       particleGL.setViewport(newXMin, newXMax, newTMin, newTMax);
     }
+  }
+
+  function applyZoom(zoomFactor, cx, cy) {
+    const [worldX, worldT] = renderer.canvasToWorld(cx, cy);
+
+    const newXMin = worldX - (worldX - renderer.xMin) * zoomFactor;
+    const newXMax = worldX + (renderer.xMax - worldX) * zoomFactor;
+    const newTMin = Math.max(0, worldT - (worldT - renderer.tMin) * zoomFactor);
+    const newTMax = worldT + (renderer.tMax - worldT) * zoomFactor;
+
+    zoomScale /= zoomFactor;
+    currentState = { ...currentState, xRange: [newXMin, newXMax], tRange: [newTMin, newTMax] };
+    updateViewport(newXMin, newXMax, newTMin, newTMax);
+    setZoomLevel(zoomScale);
+    renderer.setViewport(newXMin, newXMax, newTMin, newTMax);
+    renderer.blitSnapshot();
+
+    if (animating) {
+      particleGL.setViewport(newXMin, newXMax, newTMin, newTMax);
+    }
+
+    scheduleRecompute();
+  }
+
+  // Mouse wheel → zoom
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
+    applyZoom(factor, cx, cy);
+  }, { passive: false });
+
+  // Mouse down → start potential pan
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    isDown = true;
+    startMouse = { x: e.clientX, y: e.clientY };
+    lastMouse = { x: e.clientX, y: e.clientY };
+    totalDrag = 0;
   });
 
-  window.addEventListener('mouseup', () => {
-    if (isPanning) {
-      isPanning = false;
-      canvas.style.cursor = '';
+  // Mouse move → pan if dragging
+  window.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    const dx = e.clientX - lastMouse.x;
+    const dy = e.clientY - lastMouse.y;
+    totalDrag += Math.abs(dx) + Math.abs(dy);
+    lastMouse = { x: e.clientX, y: e.clientY };
+
+    if (totalDrag > DRAG_THRESHOLD) {
+      canvas.style.cursor = 'grabbing';
+      applyPan(dx, dy);
+    }
+  });
+
+  // Mouse up → end pan, or trigger click-inspect if no drag
+  window.addEventListener('mouseup', (e) => {
+    if (!isDown) return;
+    isDown = false;
+    canvas.style.cursor = '';
+
+    if (totalDrag > DRAG_THRESHOLD) {
+      // Was a drag → schedule retrace
+      scheduleRecompute();
+    } else {
+      // Was a click → inspect
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      handleInspectClick(cx, cy);
+    }
+  });
+
+  // Touch: pinch to zoom, two-finger drag to pan
+  let lastTouches = null;
+
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      lastTouches = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && lastTouches) {
+      e.preventDefault();
+      const cur = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }));
+
+      // Pan: average movement
+      const dx = ((cur[0].x + cur[1].x) - (lastTouches[0].x + lastTouches[1].x)) / 2;
+      const dy = ((cur[0].y + cur[1].y) - (lastTouches[0].y + lastTouches[1].y)) / 2;
+      applyPan(dx, dy);
+
+      // Pinch zoom
+      const prevDist = Math.hypot(lastTouches[1].x - lastTouches[0].x, lastTouches[1].y - lastTouches[0].y);
+      const curDist = Math.hypot(cur[1].x - cur[0].x, cur[1].y - cur[0].y);
+      if (prevDist > 10 && curDist > 10) {
+        const factor = prevDist / curDist;
+        const rect = canvas.getBoundingClientRect();
+        const cx = (cur[0].x + cur[1].x) / 2 - rect.left;
+        const cy = (cur[0].y + cur[1].y) / 2 - rect.top;
+        applyZoom(factor, cx, cy);
+      }
+
+      lastTouches = cur;
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', () => {
+    if (lastTouches) {
+      lastTouches = null;
       scheduleRecompute();
     }
   });
@@ -304,67 +364,56 @@ function exprContainsVar(expr, v) {
 
 // ─── Hover ───
 
-function setupClickInspect(canvas) {
-  const panel = document.getElementById('inspect-panel');
-  const title = document.getElementById('inspect-title');
-  const eqns = document.getElementById('inspect-equations');
-  const canvasX = document.getElementById('inspect-canvas-x');
-  const canvasU = document.getElementById('inspect-canvas-u');
-  const closeBtn = document.getElementById('inspect-close');
+// Inspect panel refs (set up in init)
+let inspectPanel, inspectTitle, inspectEqns, inspectCanvasX, inspectCanvasU;
 
-  closeBtn.addEventListener('click', () => panel.classList.add('hidden'));
+function initInspectPanel() {
+  inspectPanel = document.getElementById('inspect-panel');
+  inspectTitle = document.getElementById('inspect-title');
+  inspectEqns = document.getElementById('inspect-equations');
+  inspectCanvasX = document.getElementById('inspect-canvas-x');
+  inspectCanvasU = document.getElementById('inspect-canvas-u');
+  document.getElementById('inspect-close').addEventListener('click', () => inspectPanel.classList.add('hidden'));
+}
 
-  canvas.addEventListener('click', (e) => {
-    if (e.ctrlKey || e.metaKey || panMode) return;
-    const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
+function handleInspectClick(cx, cy) {
+  let bestChar = null;
+  let bestDist = Infinity;
 
-    let bestChar = null;
-    let bestDist = Infinity;
-
-    for (const char of currentCharacteristics) {
-      for (let i = 0; i < char.points.length; i += 3) {
-        const p = char.points[i];
-        const [pcx, pcy] = renderer.worldToCanvas(p.x, p.t);
-        const dist = Math.hypot(pcx - cx, pcy - cy);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestChar = char;
-        }
+  for (const char of currentCharacteristics) {
+    for (let i = 0; i < char.points.length; i += 3) {
+      const p = char.points[i];
+      const [pcx, pcy] = renderer.worldToCanvas(p.x, p.t);
+      const dist = Math.hypot(pcx - cx, pcy - cy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestChar = char;
       }
     }
+  }
 
-    if (!bestChar || bestDist > 20) {
-      panel.classList.add('hidden');
-      return;
-    }
+  if (!bestChar || bestDist > 20) {
+    inspectPanel.classList.add('hidden');
+    return;
+  }
 
-    panel.classList.remove('hidden');
-    title.textContent = `x\u2080 = ${bestChar.x0.toFixed(3)}, u\u2080 = ${isFinite(bestChar.u0) ? bestChar.u0.toFixed(3) : 'N/A'}`;
+  inspectPanel.classList.remove('hidden');
+  inspectTitle.textContent = `x\u2080 = ${bestChar.x0.toFixed(3)}, u\u2080 = ${isFinite(bestChar.u0) ? bestChar.u0.toFixed(3) : 'N/A'}`;
 
-    // Show analytical solution (from the symbolic solver, if available)
-    eqns.innerHTML = '';
-    const solDiv = document.createElement('div');
-    solDiv.id = 'inspect-sol';
-    eqns.appendChild(solDiv);
+  inspectEqns.innerHTML = '';
+  const solDiv = document.createElement('div');
+  solDiv.id = 'inspect-sol';
+  inspectEqns.appendChild(solDiv);
 
-    // Fetch symbolic solution for display
-    solveCharacteristics(currentState.a, currentState.b).then(solutions => {
-      const lines = [];
-      if (solutions.xSolution) lines.push(solutions.xSolution.latex);
-      if (solutions.uSolution) lines.push(solutions.uSolution.latex);
-      if (lines.length) {
-        for (const latex of lines) {
-          renderSolution(solDiv, lines.join(', \\quad '));
-        }
-      }
-    }).catch(() => {});
+  solveCharacteristics(currentState.a, currentState.b).then(solutions => {
+    const lines = [];
+    if (solutions.xSolution) lines.push(solutions.xSolution.latex);
+    if (solutions.uSolution) lines.push(solutions.uSolution.latex);
+    if (lines.length) renderSolution(solDiv, lines.join(', \\quad '));
+  }).catch(() => {});
 
-    // Draw x(t) and u(t) curves
-    drawMiniGraph(canvasX, bestChar, 'x');
-    drawMiniGraph(canvasU, bestChar, 'u');
-  });
+  drawMiniGraph(inspectCanvasX, bestChar, 'x');
+  drawMiniGraph(inspectCanvasU, bestChar, 'u');
 }
 
 function drawMiniGraph(canvas, char, field) {
@@ -480,8 +529,7 @@ function setupHover(canvas) {
 // ─── Zoom buttons ───
 
 function setupZoomButtons() {
-  const { zoomIn, zoomOut, recenter, fit, panMode: panModeBtn } = getZoomControls();
-  const canvas = document.getElementById('main-canvas');
+  const { zoomIn, zoomOut, recenter, fit } = getZoomControls();
 
   function zoom(factor) {
     const cx = (renderer.xMin + renderer.xMax) / 2;
@@ -542,12 +590,6 @@ function setupZoomButtons() {
     recompute();
   });
 
-  // Pan mode toggle
-  panModeBtn?.addEventListener('click', () => {
-    panMode = !panMode;
-    panModeBtn.classList.toggle('active', panMode);
-    canvas.style.cursor = panMode ? 'grab' : '';
-  });
 }
 
 // ─── Init ───
@@ -566,9 +608,9 @@ document.addEventListener('DOMContentLoaded', () => {
   uSolDisplay = document.getElementById('u-solution-display');
 
   initUI(recompute);
+  initInspectPanel();
   setupHover(canvas);
-  setupClickInspect(canvas);
-  setupPanZoom(canvas);
+  setupInteraction(canvas);
   setupZoomButtons();
 
   let resizeTimer;

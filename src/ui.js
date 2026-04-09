@@ -99,16 +99,32 @@ export function initUI(onRecompute) {
     onRecompute();
   });
 
-  // Domain type
+  // Domain type — update viewport to show the domain
+  function fitDomain() {
+    const dt = elements.domainType.value;
+    const a = parseFloat(elements.domainA.value);
+    const b = parseFloat(elements.domainB.value);
+    if (dt === 'a-b' && isFinite(a) && isFinite(b)) {
+      const margin = (b - a) * 0.2;
+      elements.xMin.value = (a - margin).toFixed(1);
+      elements.xMax.value = (b + margin).toFixed(1);
+    } else if (dt === 'a-inf' && isFinite(a)) {
+      elements.xMin.value = (a - 1).toFixed(1);
+    } else if (dt === 'inf-b' && isFinite(b)) {
+      elements.xMax.value = (b + 1).toFixed(1);
+    }
+  }
+
   elements.domainType.addEventListener('change', () => {
     const dt = elements.domainType.value;
     elements.domainALabel.style.display = (dt === 'a-inf' || dt === 'a-b') ? '' : 'none';
     elements.domainBLabel.style.display = (dt === 'inf-b' || dt === 'a-b') ? '' : 'none';
     elements.bcLabel.style.display = dt !== 'R' ? '' : 'none';
+    fitDomain();
     onRecompute();
   });
-  elements.domainA.addEventListener('change', onRecompute);
-  elements.domainB.addEventListener('change', onRecompute);
+  elements.domainA.addEventListener('change', () => { fitDomain(); onRecompute(); });
+  elements.domainB.addEventListener('change', () => { fitDomain(); onRecompute(); });
   elements.inputBC.addEventListener('input', () => {
     elements.presetSelect.value = '-1';
     debouncedRecompute();
