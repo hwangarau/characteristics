@@ -135,6 +135,15 @@ export function getState() {
 }
 
 /**
+ * Get the currently selected preset (or null if custom).
+ */
+export function getCurrentPreset() {
+  const idx = parseInt(elements.presetSelect.value);
+  if (idx >= 0 && idx < PRESETS.length) return PRESETS[idx];
+  return null;
+}
+
+/**
  * Update viewport controls from pan/zoom.
  */
 export function updateViewport(xMin, xMax, tMin, tMax) {

@@ -12,7 +12,7 @@ import { compileExpression, compileInitialData } from './math-pipeline.js';
 import { renderEquation, renderInitialCondition, renderSolution } from './equation-display.js';
 import { traceCharacteristics, resolveShocks } from './integrator.js';
 import { solveCharacteristics, formatSolutionDisplay } from './symbolic.js';
-import { initUI, getState, setStatus, loadPreset, updateViewport, setZoomLevel, getZoomControls } from './ui.js';
+import { initUI, getState, setStatus, loadPreset, updateViewport, setZoomLevel, getZoomControls, getCurrentPreset } from './ui.js';
 import { PRESETS } from './presets.js';
 
 let renderer;
@@ -37,9 +37,6 @@ let pdeDisplay, charOdeDisplay, icDisplay, xSolDisplay, uSolDisplay;
 function recompute() {
   const state = getState();
   currentState = state;
-
-  // Save default viewport for recenter (updated on each full recompute)
-  defaultViewport = { xRange: [...state.xRange], tRange: [...state.tRange] };
 
   // Clear error styles
   document.getElementById('input-a').classList.remove('error');
@@ -464,10 +461,17 @@ function setupZoomButtons() {
   zoomOut?.addEventListener('click', () => zoom(1.3));
 
   recenter?.addEventListener('click', () => {
-    if (defaultViewport) {
+    const preset = getCurrentPreset();
+    if (preset) {
+      zoomScale = 1.0;
+      currentState = { ...currentState, xRange: [...preset.xRange], tRange: [...preset.tRange] };
+      updateViewport(preset.xRange[0], preset.xRange[1], preset.tRange[0], preset.tRange[1]);
+      setZoomLevel(1.0);
+      recompute();
+    } else if (defaultViewport) {
       zoomScale = 1.0;
       currentState = { ...currentState, xRange: [...defaultViewport.xRange], tRange: [...defaultViewport.tRange] };
-      updateViewport(...defaultViewport.xRange, ...defaultViewport.tRange);
+      updateViewport(defaultViewport.xRange[0], defaultViewport.xRange[1], defaultViewport.tRange[0], defaultViewport.tRange[1]);
       setZoomLevel(1.0);
       recompute();
     }
